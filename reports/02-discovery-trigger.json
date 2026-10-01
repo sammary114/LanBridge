@@ -1,0 +1,211 @@
+{
+  "summary": {
+    "filepath": "C:\\Users\\sammary\\Desktop\\project\\LanBridge\\captures\\02-discovery-trigger.pcapng",
+    "filesize_bytes": 1292,
+    "total_packets": 8,
+    "filtered_packets": 8,
+    "start_time": "2026-10-01T12:02:53.890735+00:00",
+    "end_time": "2026-10-01T12:02:59.058747+00:00",
+    "duration_seconds": 5.168,
+    "protocols": {
+      "UDP": 6,
+      "OTHER": 2
+    },
+    "endpoints": [
+      "172.31.112.1",
+      "172.31.122.254"
+    ],
+    "conversations": {
+      "172.31.112.1 <-> 172.31.122.254": 6
+    }
+  },
+  "tcp_streams": [],
+  "udp_flows": [
+    {
+      "flow_id": 1,
+      "endpoint_a": "172.31.112.1:9012",
+      "endpoint_b": "172.31.122.254:9012",
+      "packet_count": 6,
+      "duration_seconds": 5.168,
+      "bytes_a_to_b": 174,
+      "bytes_b_to_a": 64,
+      "flow_description": "Nwt Protocol (3 Reqs, 3 ACKs)"
+    }
+  ],
+  "packets": [
+    {
+      "index": 1,
+      "relative_time": 0.0,
+      "timestamp": 1790856173.890735,
+      "wire_len": 124,
+      "protocol": "UDP",
+      "src_ip": "172.31.112.1",
+      "src_port": 9012,
+      "dst_ip": "172.31.122.254",
+      "dst_port": 9012,
+      "payload_len": 82,
+      "payload_hex": "8000fd9e86000047004800000048000003e936af741655c86a859229113f6883a31e3a643fa23c20e0aec1aaf895d8ce4ca96825651daa0f80175ed24a2c453c12f209d3b6367313413618966a889a6e3490",
+      "payload_ascii": ".......G.H...H....6.t.U.j..).?h...:d?.< ........L.h%e.....^.J,E<.....6s.A6..j..n4.",
+      "app_info": {
+        "type": "NWT_REQ",
+        "seq_id": "0xfd9e",
+        "opcode": "0x86",
+        "total_len": 82,
+        "channel_id": "0x0047",
+        "inner_len": 72,
+        "data_len": 66,
+        "data_hex": "03e936af741655c86a859229113f6883a31e3a643fa23c20e0aec1aaf895d8ce4ca96825651daa0f80175ed24a2c453c12f209d3b6367313413618966a889a6e3490",
+        "subtype": "Status/StateUpdate"
+      },
+      "udp_len": 90
+    },
+    {
+      "index": 2,
+      "relative_time": 0.042707,
+      "timestamp": 1790856173.9334416,
+      "wire_len": 52,
+      "protocol": "UDP",
+      "src_ip": "172.31.122.254",
+      "src_port": 9012,
+      "dst_ip": "172.31.112.1",
+      "dst_port": 9012,
+      "payload_len": 10,
+      "payload_hex": "0000010000470047fd9e",
+      "payload_ascii": ".....G.G..",
+      "app_info": {
+        "type": "NWT_ACK",
+        "ack_type": "0x01",
+        "ack_seq_id": "0xfd9e",
+        "total_len": 10,
+        "channel_or_sub": "0x0047"
+      },
+      "udp_len": 18
+    },
+    {
+      "index": 3,
+      "relative_time": 0.646404,
+      "timestamp": 1790856174.5371387,
+      "wire_len": 86,
+      "protocol": "UDP",
+      "src_ip": "172.31.122.254",
+      "src_port": 9012,
+      "dst_ip": "172.31.112.1",
+      "dst_port": 9012,
+      "payload_len": 44,
+      "payload_hex": "8000399e86000041002200000022000003f8d529c5439de045c9d3dc11866769e1fedfa896e8e704a5532f3e",
+      "payload_ascii": "..9....A.\"...\".....).C..E.....gi.........S/>",
+      "app_info": {
+        "type": "NWT_REQ",
+        "seq_id": "0x399e",
+        "opcode": "0x86",
+        "total_len": 44,
+        "channel_id": "0x0041",
+        "inner_len": 34,
+        "data_len": 28,
+        "data_hex": "03f8d529c5439de045c9d3dc11866769e1fedfa896e8e704a5532f3e",
+        "subtype": "Handshake/Token"
+      },
+      "udp_len": 52
+    },
+    {
+      "index": 4,
+      "relative_time": 0.704798,
+      "timestamp": 1790856174.5955324,
+      "wire_len": 52,
+      "protocol": "UDP",
+      "src_ip": "172.31.112.1",
+      "src_port": 9012,
+      "dst_ip": "172.31.122.254",
+      "dst_port": 9012,
+      "payload_len": 10,
+      "payload_hex": "0000010000410041399e",
+      "payload_ascii": ".....A.A9.",
+      "app_info": {
+        "type": "NWT_ACK",
+        "ack_type": "0x01",
+        "ack_seq_id": "0x399e",
+        "total_len": 10,
+        "channel_or_sub": "0x0041"
+      },
+      "udp_len": 18
+    },
+    {
+      "index": 5,
+      "relative_time": 4.543331,
+      "timestamp": 1790856178.4340663,
+      "wire_len": 42,
+      "protocol": "OTHER",
+      "src_ip": "",
+      "src_port": null,
+      "dst_ip": "",
+      "dst_port": null,
+      "payload_len": 0,
+      "payload_hex": "",
+      "payload_ascii": "",
+      "app_info": null
+    },
+    {
+      "index": 6,
+      "relative_time": 4.543347,
+      "timestamp": 1790856178.434082,
+      "wire_len": 42,
+      "protocol": "OTHER",
+      "src_ip": "",
+      "src_port": null,
+      "dst_ip": "",
+      "dst_port": null,
+      "payload_len": 0,
+      "payload_hex": "",
+      "payload_ascii": "",
+      "app_info": null
+    },
+    {
+      "index": 7,
+      "relative_time": 5.13013,
+      "timestamp": 1790856179.0208645,
+      "wire_len": 124,
+      "protocol": "UDP",
+      "src_ip": "172.31.112.1",
+      "src_port": 9012,
+      "dst_ip": "172.31.122.254",
+      "dst_port": 9012,
+      "payload_len": 82,
+      "payload_hex": "800011a886000048004800000048000003e936af741655c86a859229113f6883a31e3a643fa23c20e0aec1aaf895d8ce4ca98a324c97211460755ed24a2c453c12f209d3b6367313413618966a889a6e3490",
+      "payload_ascii": ".......H.H...H....6.t.U.j..).?h...:d?.< ........L..2L.!.`u^.J,E<.....6s.A6..j..n4.",
+      "app_info": {
+        "type": "NWT_REQ",
+        "seq_id": "0x11a8",
+        "opcode": "0x86",
+        "total_len": 82,
+        "channel_id": "0x0048",
+        "inner_len": 72,
+        "data_len": 66,
+        "data_hex": "03e936af741655c86a859229113f6883a31e3a643fa23c20e0aec1aaf895d8ce4ca98a324c97211460755ed24a2c453c12f209d3b6367313413618966a889a6e3490",
+        "subtype": "Status/StateUpdate"
+      },
+      "udp_len": 90
+    },
+    {
+      "index": 8,
+      "relative_time": 5.168012,
+      "timestamp": 1790856179.0587473,
+      "wire_len": 52,
+      "protocol": "UDP",
+      "src_ip": "172.31.122.254",
+      "src_port": 9012,
+      "dst_ip": "172.31.112.1",
+      "dst_port": 9012,
+      "payload_len": 10,
+      "payload_hex": "000001000048004811a8",
+      "payload_ascii": ".....H.H..",
+      "app_info": {
+        "type": "NWT_ACK",
+        "ack_type": "0x01",
+        "ack_seq_id": "0x11a8",
+        "total_len": 10,
+        "channel_or_sub": "0x0048"
+      },
+      "udp_len": 18
+    }
+  ]
+}

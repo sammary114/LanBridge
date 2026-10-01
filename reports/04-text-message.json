@@ -1,0 +1,288 @@
+{
+  "summary": {
+    "filepath": "C:\\Users\\sammary\\Desktop\\project\\LanBridge\\captures\\04-text-message.pcapng",
+    "filesize_bytes": 3140,
+    "total_packets": 11,
+    "filtered_packets": 11,
+    "start_time": "2026-10-01T12:11:18.519259+00:00",
+    "end_time": "2026-10-01T12:11:23.428535+00:00",
+    "duration_seconds": 4.9093,
+    "protocols": {
+      "UDP": 9,
+      "OTHER": 2
+    },
+    "endpoints": [
+      "172.31.112.1",
+      "172.31.122.254"
+    ],
+    "conversations": {
+      "172.31.112.1 <-> 172.31.122.254": 9
+    }
+  },
+  "tcp_streams": [],
+  "udp_flows": [
+    {
+      "flow_id": 1,
+      "endpoint_a": "172.31.112.1:9012",
+      "endpoint_b": "172.31.122.254:9012",
+      "packet_count": 9,
+      "duration_seconds": 3.1015,
+      "bytes_a_to_b": 118,
+      "bytes_b_to_a": 1741,
+      "flow_description": "Nwt Protocol (5 Reqs, 4 ACKs)"
+    }
+  ],
+  "packets": [
+    {
+      "index": 1,
+      "relative_time": 0.0,
+      "timestamp": 1790856678.5192592,
+      "wire_len": 120,
+      "protocol": "UDP",
+      "src_ip": "172.31.122.254",
+      "src_port": 9012,
+      "dst_ip": "172.31.112.1",
+      "dst_port": 9012,
+      "payload_len": 78,
+      "payload_hex": "8000ea518600004b004400000044000003f069e9b754d98ba0614f259a85071268d63a643fa23c20e0aeef113e4e5542c94494fcc7296c1147cdfaea94d196b187848682d9471761869f494e473e",
+      "payload_ascii": "...Q...K.D...D....i..T...aO%....h.:d?.< ....>NUB.D...)l.G............G.a..ING>",
+      "app_info": {
+        "type": "NWT_REQ",
+        "seq_id": "0xea51",
+        "opcode": "0x86",
+        "total_len": 78,
+        "channel_id": "0x004b",
+        "inner_len": 68,
+        "data_len": 62,
+        "data_hex": "03f069e9b754d98ba0614f259a85071268d63a643fa23c20e0aeef113e4e5542c94494fcc7296c1147cdfaea94d196b187848682d9471761869f494e473e",
+        "subtype": "TypingIndicator"
+      },
+      "udp_len": 86
+    },
+    {
+      "index": 2,
+      "relative_time": 0.06544,
+      "timestamp": 1790856678.5846996,
+      "wire_len": 52,
+      "protocol": "UDP",
+      "src_ip": "172.31.112.1",
+      "src_port": 9012,
+      "dst_ip": "172.31.122.254",
+      "dst_port": 9012,
+      "payload_len": 10,
+      "payload_hex": "00000100004b004bea51",
+      "payload_ascii": ".....K.K.Q",
+      "app_info": {
+        "type": "NWT_ACK",
+        "ack_type": "0x01",
+        "ack_seq_id": "0xea51",
+        "total_len": 10,
+        "channel_or_sub": "0x004b"
+      },
+      "udp_len": 18
+    },
+    {
+      "index": 3,
+      "relative_time": 1.00518,
+      "timestamp": 1790856679.5244396,
+      "wire_len": 1442,
+      "protocol": "UDP",
+      "src_ip": "172.31.122.254",
+      "src_port": 9012,
+      "dst_ip": "172.31.112.1",
+      "dst_port": 9012,
+      "payload_len": 1400,
+      "payload_hex": "8000ee3e8800004c004c055c0000000200000000000005ef00000000000005ef000003ec69e9b754d98ba0613a02421ab9c4aa9bc716e2d3c1b16c1e06b5633ebcf7de437264791efebe916c74ecff5f446673a1b39dcc292492e91da4bc30e50085666a464dd33f65820629bad77fc9e13368d59fd99c446f46403a34174ce2d86ab27801a8d5100b609d12aadb19c84fde08e701b97b6b81ddda7314d18da392d9a0f360178ebb40f237b979b1c1687be4f678e20e360fd8cd483c96699f86ac250627b3abc75db505307963e61353a6613281ab8fb93ec2cdb23450d103bc2fff0c258b9f750e37c716c8bad77fc9e13368d550d103bc2fff0c25b53c28f736af1a578b9f750e37c716c8bad77fc9e13368d550d103bc2fff0c258b9f750e37c716c8bad77fc9e13368d550d103bc2fff0c2529d36aee38ace372eaefcfa8239a32726865f450616ed8a4781e05eb7086effbb8a764b1829531e150d103bc2fff0c258b9f750e37c716c8bad77fc9e13368d550d103bc2fff0c258b9f750e37c716c8bad77fc9e13368d550d103bc2fff0c258b9f750e37c716c801b97b6b81ddda7306ef202fe871255c3b66819774062ae429d36aee38ace3721a3073fcfa0cd22f9550af0f88f4e72150d103bc2fff0c258b9f750e37c716c8bad77fc9e13368d550d103bc2fff0c258b9f750e37c716c8bad77fc9e13368d550d103bc2fff0c258b9f750e37c716c8bad77fc9e13368d5ae797509e4ee0a3001a8d5100b609d12aadb19c84fde08e701b97b6b81ddda731733003552682bd89e1d6d2f26b1ec5ce20e360fd8cd483cc00165695361c4cd8e4dc03bde7ce7a8e20e360fd8cd483cc00165695361c4cd8e4dc03bde7ce7a88c6b00a0333f92f7e20e360fd8cd483cc00165695361c4cd8e4dc03bde7ce7a8e20e360fd8cd483c3b16f04d218863fdc00165695361c4cda9b33dd5f01a8fa984dbd8e9f08ac6d050d103bc2fff0c2529d36aee38ace372f585323175d85e20b4622706df684f2daac25024f02f8b4379b1c1687be4f678e20e360fd8cd483cc00165695361c4cd8e4dc03bde7ce7a878715b1d9caf72c12bb73323bb68348fb4622706df684f2da30c4845f451b54a8e4f4e19c399b92fa51e58ef0f20cae08b9f750e37c716c8bad77fc9e13368d550d103bc2fff0c258b9f750e37c716c801b97b6b81ddda73e8c05b655108296f3b66819774062ae429d36aee38ace372feff64962935fd7873006742ac67550784dbd8e9f08ac6d050d103bc2fff0c258b9f750e37c716c8bad77fc9e13368d59fd99c446f46403aadeb0ac02325fa0f6865f450616ed8a4781e05eb7086effbe3d22d2f4beceb77d306a821c10a568ee20e360fd8cd483cc00165695361c4cd8e4dc03bde7ce7a8e20e360fd8cd483c96699f86ac2506276e3740031a17118b28fe377f79063d8378715b1d9caf72c15fff39e560de5204a6dde898f68c625ad306a821c10a568ee20e360fd8cd483cc00165695361c4cd8e4dc03bde7ce7a8e20e360fd8cd483c96699f86ac250627bde56659be6471b028fe377f79063d8378715b1d9caf72c1171644fa80d0dedf999eb8fdca7f9606bad77fc9e13368d550d103bc2fff0c258b9f750e37c716c8bad77fc9e13368d59b63ea79515fbb1b01a8d5100b609d12aadb19c84fde08e701b97b6b81ddda7348e98fb06d66f13550d103bc2fff0c258b9f750e37c716c8996f365cf55b851cc00165695361c4cd8e4dc03bde7ce7a8ea612f069f10ebbc01a8d5100b609d12aadb19c84fde08e701b97b6b81ddda73b2628e52f988f0c2b034af7a38b6710e241efcaea46abf83d402be7fbf37096b9550af0f88f4e72150d103bc2fff0c258b9f750e37c716c801b97b6b81ddda73ecfa934f8f3a7e07b4622706df684f2da30c4845f451b54a8e4f4e19c399b92fa51e58ef0f20cae08b9f750e",
+      "payload_ascii": "...>...L.L.\\........................i..T...a:.B...........l...c>...Crdy....lt.._Dfs....)$.....0...fj...",
+      "app_info": {
+        "type": "NWT_REQ",
+        "seq_id": "0xee3e",
+        "opcode": "0x88",
+        "total_len": 1400,
+        "total_frags": 2,
+        "frag_idx": 0,
+        "total_msg_len": 1519,
+        "frag_offset": 0,
+        "frag_len": 1372,
+        "subtype": "Fragment (1/2, len=1372B, total=1519B)"
+      },
+      "udp_len": 1408
+    },
+    {
+      "index": 4,
+      "relative_time": 1.005183,
+      "timestamp": 1790856679.524442,
+      "wire_len": 217,
+      "protocol": "UDP",
+      "src_ip": "172.31.122.254",
+      "src_port": 9012,
+      "dst_ip": "172.31.112.1",
+      "dst_port": 9012,
+      "payload_len": 175,
+      "payload_hex": "8000ee3e8800004d004c00930000000200000001000005ef0000055c37c716c8bad77fc9e13368d57178f07c6497413bf842e98ce38cfe2f3b66819774062ae429d36aee38ace3729c7802f3da5b2d89022be69af6fba2aa3320c9abac93ea3c87834a792c6411f4075cc691966b299c3fe8f1a0239429576a50737fffdbebdb9101281ff07fd873585e960fa9485009d79ac3fe67cdff68f35f483a169a2d189779ccc9b5c854f44e445f4d53473e",
+      "payload_ascii": "...>...M.L.................\\7........3h.qx.|d.A;.B...../;f..t.*.).j.8..r.x...[-..+......3 .....<..Jy...",
+      "app_info": {
+        "type": "NWT_REQ",
+        "seq_id": "0xee3e",
+        "opcode": "0x88",
+        "total_len": 175,
+        "total_frags": 2,
+        "frag_idx": 1,
+        "total_msg_len": 1519,
+        "frag_offset": 1372,
+        "frag_len": 147,
+        "subtype": "Fragment (2/2, len=147B, total=1519B)"
+      },
+      "udp_len": 183
+    },
+    {
+      "index": 5,
+      "relative_time": 1.045577,
+      "timestamp": 1790856679.5648363,
+      "wire_len": 60,
+      "protocol": "UDP",
+      "src_ip": "172.31.112.1",
+      "src_port": 9012,
+      "dst_ip": "172.31.122.254",
+      "dst_port": 9012,
+      "payload_len": 18,
+      "payload_hex": "00000100004c004cee3e0100004d004dee3e",
+      "payload_ascii": ".....L.L.>...M.M.>",
+      "app_info": {
+        "type": "NWT_ACK",
+        "ack_type": "0x01",
+        "ack_seq_id": "0xee3e",
+        "total_len": 18,
+        "channel_or_sub": "0x004c",
+        "subtype": "MultiACK (18B)"
+      },
+      "udp_len": 26
+    },
+    {
+      "index": 6,
+      "relative_time": 1.259978,
+      "timestamp": 1790856679.779237,
+      "wire_len": 122,
+      "protocol": "UDP",
+      "src_ip": "172.31.112.1",
+      "src_port": 9012,
+      "dst_ip": "172.31.122.254",
+      "dst_port": 9012,
+      "payload_len": 80,
+      "payload_hex": "8000b5c386000051004600000046000003ed69e9b754d98ba061b0e81ef94b110d9a426afbd748cd5e93af5708318a5fcccf59f1180d456b7fc3c86dbb00d372b1816c41dd6bdac3f9c0475f41434b3e",
+      "payload_ascii": ".......Q.F...F....i..T...a....K...Bj..H.^..W.1._..Y...Ek...m...r..lA.k....G_ACK>",
+      "app_info": {
+        "type": "NWT_REQ",
+        "seq_id": "0xb5c3",
+        "opcode": "0x86",
+        "total_len": 80,
+        "channel_id": "0x0051",
+        "inner_len": 70,
+        "data_len": 64,
+        "data_hex": "03ed69e9b754d98ba061b0e81ef94b110d9a426afbd748cd5e93af5708318a5fcccf59f1180d456b7fc3c86dbb00d372b1816c41dd6bdac3f9c0475f41434b3e",
+        "subtype": "MsgAck/Receipt"
+      },
+      "udp_len": 88
+    },
+    {
+      "index": 7,
+      "relative_time": 1.306693,
+      "timestamp": 1790856679.825952,
+      "wire_len": 52,
+      "protocol": "UDP",
+      "src_ip": "172.31.122.254",
+      "src_port": 9012,
+      "dst_ip": "172.31.112.1",
+      "dst_port": 9012,
+      "payload_len": 10,
+      "payload_hex": "0000010000510051b5c3",
+      "payload_ascii": ".....Q.Q..",
+      "app_info": {
+        "type": "NWT_ACK",
+        "ack_type": "0x01",
+        "ack_seq_id": "0xb5c3",
+        "total_len": 10,
+        "channel_or_sub": "0x0051"
+      },
+      "udp_len": 18
+    },
+    {
+      "index": 8,
+      "relative_time": 3.018955,
+      "timestamp": 1790856681.5382137,
+      "wire_len": 120,
+      "protocol": "UDP",
+      "src_ip": "172.31.122.254",
+      "src_port": 9012,
+      "dst_ip": "172.31.112.1",
+      "dst_port": 9012,
+      "payload_len": 78,
+      "payload_hex": "8000f61c8600004e004400000044000003f069e9b754d98ba0614f259a85071268d63a643fa23c20e0aeef113e4e5542c94494fcc7296c1147cdfaea94d196b187848682d9471761869f494e473e",
+      "payload_ascii": ".......N.D...D....i..T...aO%....h.:d?.< ....>NUB.D...)l.G............G.a..ING>",
+      "app_info": {
+        "type": "NWT_REQ",
+        "seq_id": "0xf61c",
+        "opcode": "0x86",
+        "total_len": 78,
+        "channel_id": "0x004e",
+        "inner_len": 68,
+        "data_len": 62,
+        "data_hex": "03f069e9b754d98ba0614f259a85071268d63a643fa23c20e0aeef113e4e5542c94494fcc7296c1147cdfaea94d196b187848682d9471761869f494e473e",
+        "subtype": "TypingIndicator"
+      },
+      "udp_len": 86
+    },
+    {
+      "index": 9,
+      "relative_time": 3.101458,
+      "timestamp": 1790856681.6207173,
+      "wire_len": 52,
+      "protocol": "UDP",
+      "src_ip": "172.31.112.1",
+      "src_port": 9012,
+      "dst_ip": "172.31.122.254",
+      "dst_port": 9012,
+      "payload_len": 10,
+      "payload_hex": "00000100004e004ef61c",
+      "payload_ascii": ".....N.N..",
+      "app_info": {
+        "type": "NWT_ACK",
+        "ack_type": "0x01",
+        "ack_seq_id": "0xf61c",
+        "total_len": 10,
+        "channel_or_sub": "0x004e"
+      },
+      "udp_len": 18
+    },
+    {
+      "index": 10,
+      "relative_time": 4.909258,
+      "timestamp": 1790856683.4285173,
+      "wire_len": 42,
+      "protocol": "OTHER",
+      "src_ip": "",
+      "src_port": null,
+      "dst_ip": "",
+      "dst_port": null,
+      "payload_len": 0,
+      "payload_hex": "",
+      "payload_ascii": "",
+      "app_info": null
+    },
+    {
+      "index": 11,
+      "relative_time": 4.909275,
+      "timestamp": 1790856683.4285345,
+      "wire_len": 42,
+      "protocol": "OTHER",
+      "src_ip": "",
+      "src_port": null,
+      "dst_ip": "",
+      "dst_port": null,
+      "payload_len": 0,
+      "payload_hex": "",
+      "payload_ascii": "",
+      "app_info": null
+    }
+  ]
+}
