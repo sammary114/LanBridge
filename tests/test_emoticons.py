@@ -153,13 +153,12 @@ class TestEmoticonsEngine(unittest.TestCase):
         dt3 = [{"txt": {"t": "normal", "v": "好样的 [真棒] 辛苦啦"}}]
         self.assertEqual(nwt_dt_to_emoji_text(dt3), "好样的 👍 辛苦啦")
 
-        # Non-sys image & retrieve node
-        dt4 = [
-            {"txt": {"t": "normal", "v": "发图: "}},
-            {"img": {"t": "md5", "v": "abc123"}},
-            {"retrieve": {"v": "uuid", "m": "msg"}},
+        # Custom image wire format: <id>|<md5>
+        dt_custom_img = [
+            {"img": {"t": "feihu", "v": "16513|a69b587dfc63672f1d95eb3ee303b5d1"}},
+            {"txt": {"t": "normal", "v": "图片文本"}},
         ]
-        self.assertEqual(nwt_dt_to_emoji_text(dt4), "发图: [图片][撤回消息]")
+        self.assertEqual(nwt_dt_to_emoji_text(dt_custom_img), "[图片]图片文本")
 
     def test_roundtrip(self) -> None:
         """Test end-to-end roundtrip conversion."""
