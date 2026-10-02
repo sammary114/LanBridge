@@ -267,11 +267,14 @@ def nwt_dt_to_emoji_text(dt_list: List[Dict[str, Any]]) -> str:
                 img_t = img_obj.get("t", "")
                 img_v = str(img_obj.get("v", ""))
                 if img_t in ("sys", "feihu"):
-                    # Look up by ID or by Index
-                    emo = ID_TO_EMOTION.get(img_v)
-                    if not emo and img_v.isdigit():
-                        emo = INDEX_TO_EMOTION.get(int(img_v))
-                    parts.append(emo.emoji if emo else f"[{img_v}]")
+                    if "|" in img_v:
+                        parts.append("[图片]")
+                    else:
+                        # Look up by ID or by Index
+                        emo = ID_TO_EMOTION.get(img_v)
+                        if not emo and img_v.isdigit():
+                            emo = INDEX_TO_EMOTION.get(int(img_v))
+                        parts.append(emo.emoji if emo else f"[{img_v}]")
                 else:
                     parts.append("[图片]")
             else:

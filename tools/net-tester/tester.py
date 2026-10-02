@@ -223,6 +223,7 @@ def build_native_profile(
     status: int = 0,
     sign: str = "LanBridge Native Online",
     group: str = "Default",
+    tcp_file_port: int = 9013,
 ) -> bytes:
     """Build authentic encrypted X_HANDSHARK profile envelope."""
     xml = (
@@ -247,11 +248,11 @@ def build_native_profile(
         '<COLOR_NAME>0</COLOR_NAME><SORT_NAME>0</SORT_NAME><DECORATE_NAME>0</DECORATE_NAME>'
         '</INFO>'
         '<NET>'
-        '<FILE_TRAN_TCP_PORT>13603</FILE_TRAN_TCP_PORT><FILE_TRAN_ENET_PORT>0</FILE_TRAN_ENET_PORT>'
-        '<FOLDER_TRAN_TCP_PORT>13859</FOLDER_TRAN_TCP_PORT><FOLDER_TRAN_ENET_PORT>0</FOLDER_TRAN_ENET_PORT>'
-        '<FILE_TRAN_TCP_REVERSE_PORT>34825</FILE_TRAN_TCP_REVERSE_PORT><FILE_TRAN_ENET_REVERSE_PORT>0</FILE_TRAN_ENET_REVERSE_PORT>'
-        '<FOLDER_TRAN_TCP_REVERSE_PORT>35081</FOLDER_TRAN_TCP_REVERSE_PORT><FOLDER_TRAN_ENET_REVERSE_PORT>0</FOLDER_TRAN_ENET_REVERSE_PORT>'
-        '<LAN_UPDATE_HTTP_PORT>35337</LAN_UPDATE_HTTP_PORT>'
+        f'<FILE_TRAN_TCP_PORT>{tcp_file_port}</FILE_TRAN_TCP_PORT><FILE_TRAN_ENET_PORT>0</FILE_TRAN_ENET_PORT>'
+        f'<FOLDER_TRAN_TCP_PORT>{tcp_file_port + 1}</FOLDER_TRAN_TCP_PORT><FOLDER_TRAN_ENET_PORT>0</FOLDER_TRAN_ENET_PORT>'
+        f'<FILE_TRAN_TCP_REVERSE_PORT>{tcp_file_port + 2}</FILE_TRAN_TCP_REVERSE_PORT><FILE_TRAN_ENET_REVERSE_PORT>0</FILE_TRAN_ENET_REVERSE_PORT>'
+        f'<FOLDER_TRAN_TCP_REVERSE_PORT>{tcp_file_port + 3}</FOLDER_TRAN_TCP_REVERSE_PORT><FOLDER_TRAN_ENET_REVERSE_PORT>0</FOLDER_TRAN_ENET_REVERSE_PORT>'
+        f'<LAN_UPDATE_HTTP_PORT>{tcp_file_port + 4}</LAN_UPDATE_HTTP_PORT>'
         '</NET>'
         '</X_HANDSHARK>'
     )
@@ -337,6 +338,7 @@ def extract_chat_message(dec_xml: str) -> str:
                 .replace("&amp;", "&")
             )
             m_json = json.loads(unescaped)
+            logger.info("[RAW JSON BODY]: %s", unescaped)
             if "dt" in m_json and isinstance(m_json["dt"], list):
                 try:
                     from lanbridge.emoticons import nwt_dt_to_emoji_text
@@ -599,6 +601,37 @@ def build_ack_response(req_packet: bytes) -> Optional[bytes]:
     return None
 
 
+def check_and_save_image(raw_bytes: bytes, output_dir: Optional[str] = None) -> Optional[str]:
+    """Detect image magic (PNG, JPG, GIF, BMP) in raw TCP payload and save to disk."""
+    import uuid
+    if output_dir is None:
+        output_dir = os.path.join(PROJECT_ROOT, "captures", "images")
+    os.makedirs(output_dir, exist_ok=True)
+
+    png_magic = b"\x89PNG\r\n\x1a\n"
+    jpg_magic = b"\xff\xd8\xff"
+    gif_magic = b"GIF8"
+    bmp_magic = b"BM"
+
+    ext = None
+    offset = -1
+    for magic, extension in [(png_magic, "png"), (jpg_magic, "jpg"), (gif_magic, "gif"), (bmp_magic, "bmp")]:
+        pos = raw_bytes.find(magic)
+        if pos != -1:
+            ext = extension
+            offset = pos
+            break
+
+    if ext and offset != -1:
+        img_data = raw_bytes[offset:]
+        filename = f"captured_{int(time.time())}_{uuid.uuid4().hex[:6]}.{ext}"
+        filepath = os.path.join(output_dir, filename)
+        with open(filepath, "wb") as f:
+            f.write(img_data)
+        return filepath
+    return None
+
+
 class LanBridgeTester:
     """Active network endpoint simulator for Nwt protocol validation."""
 
@@ -653,8 +686,13 @@ class LanBridgeTester:
         self.frag_assembler: dict[int, dict] = {}
         self.processed_msg_ids: set[int] = set()
 
+        # TCP 9013 P2P Image/File Transfer Server
+        self.sock_tcp9013: Optional[socket.socket] = None
+        self.tcp_clients: List[socket.socket] = []
+        self.tcp_buffers: dict[socket.socket, bytearray] = {}
+
     def init_sockets(self) -> None:
-        """Create and bind UDP sockets for ports 9011, 9012, dynamic, and 2425."""
+        """Create and bind UDP sockets for ports 9011, 9012, dynamic, 2425, and TCP 9013."""
         def make_udp_socket(port: int) -> socket.socket:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -672,14 +710,33 @@ class LanBridgeTester:
         self.sock_dyn = make_udp_socket(self.dynamic_port)
         self.sock_2425 = make_udp_socket(2425)
 
+        # TCP 9013 listener
+        try:
+            self.sock_tcp9013 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock_tcp9013.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.sock_tcp9013.setblocking(False)
+            self.sock_tcp9013.bind((self.local_ip, 9013))
+            self.sock_tcp9013.listen(5)
+            logger.info("Bound TCP server on %s:9013 (Image/File Transfer)", self.local_ip)
+        except OSError as e:
+            logger.warning("Could not bind TCP 9013 on %s: %s", self.local_ip, e)
+            self.sock_tcp9013 = None
+
     def close_sockets(self) -> None:
         """Close all sockets."""
-        for s in (self.sock_9011, self.sock_9012, self.sock_dyn, self.sock_2425):
+        for s in (self.sock_9011, self.sock_9012, self.sock_dyn, self.sock_2425, self.sock_tcp9013):
             if s:
                 try:
                     s.close()
                 except Exception:
                     pass
+        for c in self.tcp_clients:
+            try:
+                c.close()
+            except Exception:
+                pass
+        self.tcp_clients.clear()
+        self.tcp_buffers.clear()
 
     def send_discovery_broadcast(self) -> None:
         """Send 304B Nwt discovery frame to Sandbox unicast and subnet broadcast."""
@@ -1127,18 +1184,55 @@ class LanBridgeTester:
                         logger.debug("[TX:9012] Sent X_HEARTBEAT keepalive")
 
                 socks = [s for s in (self.sock_9011, self.sock_9012, self.sock_dyn, self.sock_2425) if s]
+                if self.sock_tcp9013:
+                    socks.append(self.sock_tcp9013)
+                socks.extend(self.tcp_clients)
+
                 readable, _, _ = select.select(socks, [], [], 0.05)
                 for s in readable:
-                    port = (
-                        9011
-                        if s == self.sock_9011
-                        else (
-                            9012
-                            if s == self.sock_9012
-                            else (self.dynamic_port if s == self.sock_dyn else 2425)
+                    if s == self.sock_tcp9013:
+                        try:
+                            conn, caddr = self.sock_tcp9013.accept()
+                            conn.setblocking(False)
+                            self.tcp_clients.append(conn)
+                            self.tcp_buffers[conn] = bytearray()
+                            logger.info("[TCP:9013] Inbound connection established from %s", caddr)
+                        except Exception as e:
+                            logger.warning("[TCP:9013] Accept error: %s", e)
+                    elif s in self.tcp_clients:
+                        try:
+                            chunk = s.recv(8192)
+                            if not chunk:
+                                logger.info("[TCP:9013] Remote closed connection")
+                                self.tcp_clients.remove(s)
+                                s.close()
+                                if s in self.tcp_buffers:
+                                    del self.tcp_buffers[s]
+                                continue
+                            self.tcp_buffers[s].extend(chunk)
+                            logger.info("[TCP:9013] Received %d bytes (Total buffer: %d bytes)", len(chunk), len(self.tcp_buffers[s]))
+                            saved_img = check_and_save_image(bytes(self.tcp_buffers[s]))
+                            if saved_img:
+                                logger.info("*" * 65)
+                                logger.info("[IMAGE:SUCCESS] EXTRACTED & SAVED IMAGE TO: %s (%d bytes)", saved_img, os.path.getsize(saved_img))
+                                logger.info("*" * 65)
+                        except Exception as e:
+                            logger.warning("[TCP:9013] Read error: %s", e)
+                            self.tcp_clients.remove(s)
+                            s.close()
+                            if s in self.tcp_buffers:
+                                del self.tcp_buffers[s]
+                    else:
+                        port = (
+                            9011
+                            if s == self.sock_9011
+                            else (
+                                9012
+                                if s == self.sock_9012
+                                else (self.dynamic_port if s == self.sock_dyn else 2425)
+                            )
                         )
-                    )
-                    self.handle_incoming_packet(s, port)
+                        self.handle_incoming_packet(s, port)
 
         except KeyboardInterrupt:
             logger.info("Interrupted by user.")
