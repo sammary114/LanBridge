@@ -236,7 +236,7 @@ def emoji_to_nwt_dt(text: str) -> List[Dict[str, Any]]:
         matched_char = match.group(0)
         emo = ALL_EMOJI_MAP.get(matched_char)
         if emo:
-            dt.append({"img": {"t": "sys", "v": emo.id}})
+            dt.append({"img": {"t": "feihu", "v": emo.id}})
         else:
             dt.append({"txt": {"t": "normal", "v": matched_char}})
         last_idx = end

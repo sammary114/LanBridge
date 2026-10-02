@@ -101,7 +101,7 @@ class TestEmoticonsEngine(unittest.TestCase):
 
         # Single emoji
         dt2 = emoji_to_nwt_dt("😊")
-        self.assertEqual(dt2, [{"img": {"t": "sys", "v": "1251"}}])
+        self.assertEqual(dt2, [{"img": {"t": "feihu", "v": "1251"}}])
 
         # Mixed text + emojis
         dt3 = emoji_to_nwt_dt("你好 😊，点赞 👍！")
@@ -109,9 +109,9 @@ class TestEmoticonsEngine(unittest.TestCase):
             dt3,
             [
                 {"txt": {"t": "normal", "v": "你好 "}},
-                {"img": {"t": "sys", "v": "1251"}},
+                {"img": {"t": "feihu", "v": "1251"}},
                 {"txt": {"t": "normal", "v": "，点赞 "}},
-                {"img": {"t": "sys", "v": "1297"}},
+                {"img": {"t": "feihu", "v": "1297"}},
                 {"txt": {"t": "normal", "v": "！"}},
             ],
         )
@@ -122,7 +122,7 @@ class TestEmoticonsEngine(unittest.TestCase):
             dt4,
             [
                 {"txt": {"t": "normal", "v": "加油 "}},
-                {"img": {"t": "sys", "v": "1251"}},
+                {"img": {"t": "feihu", "v": "1251"}},
             ],
         )
 

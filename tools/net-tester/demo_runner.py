@@ -439,20 +439,25 @@ class LanBridgeDemoRunner:
                         # Step 2: Send Window Shake
                         self.send_shake()
                         step = 2
-                        next_action_time = now + 4.0
+                        next_action_time = now + 3.0
 
                     elif step == 2 and now >= next_action_time:
-                        # Step 3: Send Message to be recalled
-                        target_uuid, target_json = self.send_chat("这是一条即将在 3 秒后被撤回的测试消息 [114514]", msg_id=2)
+                        # Step 3: Send rich text message with emoticons
+                        self.send_chat("【测试消息 2】原生动态表情测试：给你点赞 👍 喝杯咖啡 ☕ 祝贺上线 🎉！", msg_id=2)
                         step = 3
-                        next_action_time = now + 3.5
+                        next_action_time = now + 3.0
 
                     elif step == 3 and now >= next_action_time:
-                        # Step 4: Recall the Message
-                        self.send_recall(target_uuid=target_uuid, target_raw_json=target_json, msg_id=3)
+                        if getattr(self, "enable_recall_test", False):
+                            # Optional recall demonstration
+                            target_uuid, target_json = self.send_chat("【测试撤回】这条消息将在 3 秒后撤回...", msg_id=3)
+                            time.sleep(3.0)
+                            self.send_recall(target_uuid=target_uuid, target_raw_json=target_json, msg_id=4)
+                        else:
+                            self.send_chat("【测试消息 3】双向回显模式已开启！请在沙盒中给我发任意文本或表情，我将实时应答 👇", msg_id=3)
                         step = 4
                         logger.info("=" * 65)
-                        logger.info(">>> DEMO SEQUENCE COMPLETED! All 4 features demonstrated successfully.")
+                        logger.info(">>> DEMO SEQUENCE COMPLETED! All messages delivered successfully.")
                         logger.info(">>> You can now type messages in Sandbox to test automatic echo replies!")
                         logger.info("=" * 65)
 
@@ -470,8 +475,10 @@ if __name__ == "__main__":
     parser.add_argument("sandbox_ip", nargs="?", default="172.31.121.133", help="Target Sandbox IP")
     parser.add_argument("--sandbox-ip", dest="opt_ip", default=None, help="Target Sandbox IP")
     parser.add_argument("--wait", type=int, default=45, help="Wait seconds for interactive demo")
+    parser.add_argument("--test-recall", action="store_true", help="Enable message recall test")
     args = parser.parse_args()
 
     target_ip = args.opt_ip or args.sandbox_ip
     runner = LanBridgeDemoRunner(sandbox_ip=target_ip)
+    runner.enable_recall_test = args.test_recall
     runner.run_demo(wait_seconds=args.wait)
