@@ -24,6 +24,11 @@ import sys
 import time
 from typing import List, Optional, Tuple
 
+# Ensure project root is in sys.path
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 from crypto_engine import XteaEngine
 
 import sys
@@ -269,15 +274,26 @@ def build_x_send_msg_envelope(
     message: str,
     msg_id: int = 1,
     timestamp: Optional[int] = None,
+    use_emoticons: bool = True,
 ) -> bytes:
     """Build authentic encrypted X_SEND_MSG (Opcode 1004 / 0x03ec) envelope."""
     import json, uuid
     if timestamp is None:
         timestamp = int(time.time())
+
+    if use_emoticons:
+        try:
+            from lanbridge.emoticons import emoji_to_nwt_dt
+            dt = emoji_to_nwt_dt(message)
+        except Exception:
+            dt = [{"txt": {"t": "normal", "v": message}}]
+    else:
+        dt = [{"txt": {"t": "normal", "v": message}}]
+
     msg_json = json.dumps(
         {
             "app": "shiyeline",
-            "dt": [{"txt": {"t": "normal", "v": message}}],
+            "dt": dt,
             "ft": {
                 "b": "0",
                 "c": "0x000000",
@@ -321,7 +337,14 @@ def extract_chat_message(dec_xml: str) -> str:
                 .replace("&amp;", "&")
             )
             m_json = json.loads(unescaped)
-            return m_json["dt"][0]["txt"]["v"]
+            if "dt" in m_json and isinstance(m_json["dt"], list):
+                try:
+                    from lanbridge.emoticons import nwt_dt_to_emoji_text
+                    return nwt_dt_to_emoji_text(m_json["dt"])
+                except Exception:
+                    pass
+                if len(m_json["dt"]) > 0 and "txt" in m_json["dt"][0]:
+                    return m_json["dt"][0]["txt"]["v"]
     except Exception:
         pass
     return dec_xml
