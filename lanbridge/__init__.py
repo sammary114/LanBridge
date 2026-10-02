@@ -27,6 +27,18 @@ from .protocol import (
     extract_chat_text,
     parse_discovery_packet,
 )
+from .emoticons import (
+    EMOTIONS_TABLE,
+    EmotionInfo,
+    emoji_to_nwt_dt,
+    emoji_to_nwt_text,
+    get_emotion_by_emoji,
+    get_emotion_by_id,
+    get_emotion_by_index,
+    get_emotion_by_tips,
+    nwt_dt_to_emoji_text,
+    nwt_text_to_emoji,
+)
 
 __all__ = [
     "LanBridgeClient",

@@ -142,9 +142,12 @@ def build_send_msg_xml(
     if not msg_id:
         msg_id = f"{int(time.time() * 1000):013d}_{random.randint(1000, 9999)}"
 
+    from .emoticons import emoji_to_nwt_text
+    nwt_content = emoji_to_nwt_text(content)
+
     # Escaping for XML CDATA/body
     safe_content = (
-        content.replace("&", "&amp;")
+        nwt_content.replace("&", "&amp;")
         .replace("<", "&lt;")
         .replace(">", "&gt;")
         .replace('"', "&quot;")
@@ -236,21 +239,39 @@ def extract_chat_text(xml_text: str) -> Optional[Tuple[str, str, Dict[str, Any]]
         msg_id_match = re.search(r"<MSG_ID>([^<]+)</MSG_ID>", xml_text)
         msg_id = msg_id_match.group(1).strip() if msg_id_match else ""
 
-        # Find BODY
-        body_match = re.search(r"<BODY>(.*?)</BODY>", xml_text, re.DOTALL)
+        # Find BODY or MSG
+        body_match = re.search(r"<(?:BODY|MSG)>(.*?)</(?:BODY|MSG)>", xml_text, re.DOTALL)
         if not body_match:
             return None
         body_str = body_match.group(1).strip()
-        data = json.loads(body_str)
-        text = data.get("c", "")
-        # Unescape XML entities
-        text = (
-            text.replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&quot;", '"')
-            .replace("&apos;", "'")
-            .replace("&amp;", "&")
-        )
+        try:
+            data = json.loads(body_str)
+        except Exception:
+            unescaped = (
+                body_str.replace("&quot;", '"')
+                .replace("&nbsp;", " ")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&apos;", "'")
+                .replace("&amp;", "&")
+            )
+            data = json.loads(unescaped)
+
+        if "dt" in data and isinstance(data["dt"], list):
+            from .emoticons import nwt_dt_to_emoji_text
+            text = nwt_dt_to_emoji_text(data["dt"])
+        else:
+            raw_text = data.get("c", "")
+            raw_text = (
+                raw_text.replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&quot;", '"')
+                .replace("&apos;", "'")
+                .replace("&amp;", "&")
+            )
+            from .emoticons import nwt_text_to_emoji
+            text = nwt_text_to_emoji(raw_text)
+
         return msg_id, text, data
     except Exception:
         return None
