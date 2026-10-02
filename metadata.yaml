@@ -1,0 +1,10 @@
+name: astrbot_plugin_lanbridge
+repo: https://github.com/sammary114/astrbot_plugin_lanbridge
+desc: 内网通 (Nwt / IMO 3.4.3055) 局域网即时通信平台适配器，使 AstrBot 能够作为内网通好友运行，支持双向聊天、窗口抖动与多端交互
+version: 1.0.0
+author: sammary114
+display_name: 内网通 (LanBridge) 适配器
+short_desc: 内网通局域网即时通信平台适配器
+support_platforms:
+  - lanbridge
+astrbot_version: ">=4.0.0"

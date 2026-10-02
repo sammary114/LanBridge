@@ -1,0 +1,2 @@
+# LanBridge Platform Adapter Dependencies
+# Core protocol engine is built entirely on Python standard library (asyncio, socket, struct).
