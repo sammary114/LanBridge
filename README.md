@@ -15,9 +15,10 @@ LanBridge 是一个用于深度研究与分析 Windows 局域网即时通信软�
 | :--- | :--- | :---: | :--- |
 | **M1** | 专用 PCAPNG 抓包分析器 | **已交付** | 支持会话聚合、Nwt 二进制与 HTTP 上报解码、JSON 导出 |
 | **M2** | 协议深度逆向与归档 | **已交付** | 破解 32 轮 XTEA 对称加密，固化 ENet 可靠 UDP 传输协议与握手时序 |
-| **M3** | 仿真发包与多维抓包验证 | **已交付** | 归档 4 组实机抓包样本，全面还原冷启动广播、点对点加密与分片机制 |
-| **M4** | 原生客户端模拟器 (Bot) | **已交付** | 成功在 Sandbox 原生内网通联系人列表中点亮、通过 UDP 9012 双向收发文本消息 |
-| **M5** | 协议库 SDK 封装与高级特性 | **进行中** | 整理为通用客户端库，逆向完成窗口抖动、文件传输（TCP 2440）、消息撤回信令规范 |
+| **M3** | 仿真发包与多维抓包验证 | **已交付** | 归档 5 组实机抓包样本，全面还原冷启动广播、点对点加密与分片机制 |
+| **M4** | 原生客户端模拟器 (Bot) | **已交付** | 成功在 Sandbox 原生内网通联系人列表中点亮、通过 UDP 9012 双向收发文本与高清图片 |
+| **M5** | 核心 SDK 封装与大文件/多网段 | **已交付** | 提炼生产级通用模块化库 `lanbridge`（异步客户端、CFolderTranEngine、大文件协议与多网段扫描） |
+
 
 ---
 
@@ -27,28 +28,30 @@ LanBridge 是一个用于深度研究与分析 Windows 局域网即时通信软�
 LanBridge/
 ├── AGENTS.md               # 项目背景、实验环境、上下文规则与协议规范
 ├── README.md               # 项目说明、快速上手与测试指南
+├── lanbridge/              # 核心 SDK 源码包
+│   ├── client/             # 高层客户端 (LanBridgeClient 异步事件驱动)
+│   ├── discovery/          # 多网段并发探测扫描器 (SubnetScanner)
+│   ├── protocol/           # 协议编解码与状态机
+│   │   ├── crypto.py       # XTEA 32 轮 / Blowfish / AES 密码机
+│   │   ├── enet.py         # ENet 可靠 UDP 传输层与重组器
+│   │   ├── discovery.py    # 9011 发现报文 (304B) 与 IPMSG 兼容处理
+│   │   ├── handshake.py    # 7 阶段握手原始信令构造器
+│   │   ├── messages.py     # XML / JSON 聊天消息、图片及抖动信令
+│   │   ├── folder_tran.py  # CFolderTranEngine (Cmd 1/2/3/4 图片传输)
+│   │   └── file_tran.py    # CLanFileTran (Cmd 1/2/3 大文件传输)
+│   ├── models/             # Contact, ChatMessage, FileTask 数据模型
+│   └── emoticons.py        # 内网通原生表情包与 Emoji 双向映射表
 ├── captures/               # 真实抓包样本与测试流量归档
-│   ├── nwt.pcapng          # 样本 1：宿主机与 Sandbox 初始通信与 HTTP 上报 (49 帧)
-│   ├── 02-discovery-trigger.pcapng  # 样本 2：状态切换与在线广播
-│   ├── 03-sandbox-discovery.pcapng  # 样本 3：Sandbox 冷启动完整 7 阶段握手
-│   └── 04-text-message.pcapng       # 样本 4：双向原生文本消息收发与输入状态
 ├── docs/                   # 协议研究与实验设计文档
-│   ├── protocol-notes.md   # 内网通 3.4.3055 报文格式、字段偏移与 XTEA 密码机剖析
-│   └── experiments.md      # 分阶段抓包验证清单与高级特性实机测试 TODO
-├── tools/                  # 工具集
+├── tools/                  # 原型验证与抓包分析工具
 │   ├── pcap-analyzer/      # 本地 PCAP/PCAPNG 命令行分析器
-│   │   ├── __init__.py
-│   │   └── analyzer.py
-│   └── net-tester/         # 原生客户端仿真器与协议驱动
-│       ├── __init__.py
-│       ├── crypto_engine.py # XTEA 32 轮加解密引擎 (含 AES/Blowfish 支持)
-│       ├── enet_protocol.py # ENet 可靠 UDP (0x80/0x00) 状态机与拆装包
-│       └── tester.py        # 原生客户端模拟器命令行工具 (支持点亮与自动应答)
-├── tests/                  # 自动化测试用例
-│   ├── fixtures/           # 合成测试 PCAP 样本
-│   │   └── synthetic.pcap
-│   ├── test_analyzer.py    # PCAP 分析器测试 (16 项)
-│   └── test_net_tester.py  # 协议栈、密码机与客户端模拟器测试 (27 项)
+│   └── net-tester/         # 原生客户端仿真器与网络联调工具
+├── tests/                  # 自动化测试用例套件 (67 项测试全部通过)
+│   ├── test_analyzer.py    # PCAP 分析器测试
+│   ├── test_net_tester.py  # 协议栈与原生模拟器测试
+│   ├── test_file_tran.py   # 大文件与微文件传输协议测试
+│   ├── test_emoticons.py   # 表情包编码转换测试
+│   └── test_lanbridge_sdk.py # 核心 SDK 接口与扫描器测试
 └── reports/                # 导出的机器可读分析结果
     └── analysis.json
 ```

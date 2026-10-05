@@ -241,7 +241,7 @@ ip.addr == 47.57.13.180 && tcp.port == 80
 -   `docs/protocol-notes.md`：帧号、时间、五元组、字段偏移及置信度剖析。
 -   `docs/experiments.md`：分阶段抓包方案与假设验证清单。
 -   `tools/pcap-analyzer/`：PCAPNG 分析器 CLI、会话聚合与 JSON 导出工具。
--   `tests/`：自动化测试套件（53 个测试全部通过）。
+-   `tests/`：自动化测试套件（67 个测试全部通过）。
 -   `reports/`：导出的机器可读协议分析结果。
 
 **当前状态**：
@@ -256,6 +256,10 @@ ip.addr == 47.57.13.180 && tcp.port == 80
   * 成功在 Windows Sandbox 原生**“内网通联系人”**分组下点亮 `LanBridge-Bot` 并带有绿色在线徽标。
   * 成功通过 UDP 9012 完成双向原生文本聊天交互与送达确认（收到 Sandbox 发送的 `"123456"` 并自动回显应答）。
   * 彻底攻克聊天图片破损图标（42x42）难题，成功实现从宿主机向 Sandbox 原生客户端发送图库高清图片（`images.jpg`），经 `CFolderTranEngine` TCP 端口分片传送并由原生客户端全量接收渲染。
-  * 53 项自动化测试全部通过（53/53 PASS）。
-- **当前最优先任务**：推进 M5 核心客户端开发，将逆向成果与协议栈提炼为通用 SDK / 客户端库。
+- **M5 里程碑全面交付**：
+  * 将协议核心抽象并提炼为生产级通用模块化库 `lanbridge`（`lanbridge.client.LanBridgeClient`、`lanbridge.protocol.*`、`lanbridge.discovery.SubnetScanner`、`lanbridge.models.*`）。
+  * 完善单大文件传输引擎（`CLanFileTran`，TCP 2440）Command 1/2/3 切片传输与 MD5 校验状态机。
+  * 实现基于 CIDR 的跨网段多目标并发异步主动扫描器（`SubnetScanner`）。
+  * 自动化测试扩展至 67 项，全量通过（67/67 PASS）。
+- **当前最优先任务**：推进 M6 应用层客户端开发（现代化轻量 Web 客户端 / 极客终端 TUI 客户端 / 开放 Bot 网关）。
 
