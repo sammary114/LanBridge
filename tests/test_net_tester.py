@@ -47,6 +47,9 @@ from tester import (  # noqa: E402
     build_minifile_response,
     build_minifile_chunk,
     parse_minifile_packet,
+    build_folder_tran_response,
+    build_folder_tran_chunk,
+    parse_folder_tran_packet,
     extract_chat_message,
 )
 from crypto_engine import (  # noqa: E402
@@ -514,6 +517,52 @@ class TestNetTester(unittest.TestCase):
         self.assertEqual(parsed_chk["offset"], 100)
         self.assertEqual(parsed_chk["chunk_len"], len(sample_data))
         self.assertEqual(parsed_chk["chunk_data"], sample_data)
+
+    def test_folder_tran_protocol_roundtrip(self) -> None:
+        """Verify CFolderTranEngine Command 2 (Response), Command 3 (Chunk Request), and Command 4 (Data Chunk)."""
+        file_size = 53201
+        test_token = 25609
+
+        # 1. Test Command 2 Response (108 bytes fixed)
+        rsp = build_folder_tran_response(file_size=file_size, token=test_token, chunk_size=16384)
+        self.assertEqual(len(rsp), 108)
+        parsed_rsp = parse_folder_tran_packet(rsp)
+        self.assertIsNotNone(parsed_rsp)
+        self.assertEqual(parsed_rsp["total_len"], 108)
+        self.assertEqual(parsed_rsp["type"], 1)
+        self.assertEqual(parsed_rsp["cmd"], 2)
+        self.assertEqual(parsed_rsp["token"], test_token)
+        self.assertEqual(parsed_rsp["file_size"], file_size)
+        self.assertEqual(parsed_rsp["chunk_size"], 16384)
+
+        # 2. Test Command 3 Chunk Request (108 bytes, receiver -> sender)
+        import struct
+        cmd3_buf = bytearray(108)
+        struct.pack_into(">I", cmd3_buf, 0, 108)
+        struct.pack_into(">I", cmd3_buf, 4, 1)
+        struct.pack_into(">I", cmd3_buf, 8, 3)
+        struct.pack_into(">Q", cmd3_buf, 0x34, test_token)  # token at 0x34
+        struct.pack_into(">Q", cmd3_buf, 0x3c, 0)           # start offset at 0x3c
+        struct.pack_into(">Q", cmd3_buf, 0x44, 16384)       # requested chunk_len at 0x44
+        parsed_cmd3 = parse_folder_tran_packet(bytes(cmd3_buf))
+        self.assertIsNotNone(parsed_cmd3)
+        self.assertEqual(parsed_cmd3["cmd"], 3)
+        self.assertEqual(parsed_cmd3["token"], test_token)
+        self.assertEqual(parsed_cmd3["offset"], 0)
+        self.assertEqual(parsed_cmd3["chunk_len"], 16384)
+
+        # 3. Test Command 4 Data Chunk (chunk_len + 100 bytes, sender -> receiver)
+        sample_img_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 1024
+        cmd4_pkt = build_folder_tran_chunk(file_size=file_size, offset=0, chunk_data=sample_img_bytes, token=test_token)
+        self.assertEqual(len(cmd4_pkt), len(sample_img_bytes) + 100)
+        parsed_cmd4 = parse_folder_tran_packet(cmd4_pkt)
+        self.assertIsNotNone(parsed_cmd4)
+        self.assertEqual(parsed_cmd4["cmd"], 4)
+        self.assertEqual(parsed_cmd4["token"], test_token)
+        self.assertEqual(parsed_cmd4["file_size"], file_size)
+        self.assertEqual(parsed_cmd4["offset"], 0)
+        self.assertEqual(parsed_cmd4["chunk_len"], len(sample_img_bytes))
+        self.assertEqual(parsed_cmd4["chunk_data"], sample_img_bytes)
 
 
 if __name__ == "__main__":

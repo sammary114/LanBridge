@@ -701,6 +701,103 @@ def build_minifile_chunk(file_size: int, offset: int, chunk_data: bytes) -> byte
     return bytes(buf)
 
 
+def build_folder_tran_response(file_size: int, token: int = 0, offset: int = 0, chunk_size: int = 16384) -> bytes:
+    """Build authentic 108-byte CFolderTranEngine response packet (Command 2).
+
+    Used by Nwt native chat inline image and folder/file transfer engines.
+    Header layout (BE):
+      0x00: total_len (108)
+      0x04: proto_type (1)
+      0x08: cmd (2)
+      0x34: token (64-bit)
+      0x3c: file_size (64-bit)
+      0x44: chunk_size (64-bit)
+    """
+    buf = bytearray(108)
+    struct.pack_into(">I", buf, 0, 108)  # total_len
+    struct.pack_into(">I", buf, 4, 1)    # proto_type = 1
+    struct.pack_into(">I", buf, 8, 2)    # cmd = 2 (Response)
+    struct.pack_into(">Q", buf, 0x34, token)      # 64-bit token BE
+    struct.pack_into(">Q", buf, 0x3c, file_size)  # 64-bit file size BE
+    struct.pack_into(">Q", buf, 0x44, chunk_size) # 64-bit chunk size BE
+    return bytes(buf)
+
+
+def build_folder_tran_chunk(file_size: int, offset: int, chunk_data: bytes, token: int = 0) -> bytes:
+    """Build authentic CFolderTranEngine data chunk packet (Command 4).
+
+    Header length is exactly 100 bytes (0x64), followed by raw chunk payload.
+    Header layout (BE):
+      0x00: total_len (chunk_len + 100)
+      0x04: proto_type (1)
+      0x08: cmd (4)
+      0x34: token (64-bit)
+      0x3c: file_size (64-bit)
+      0x44: offset (64-bit)
+      0x4c: chunk_len (32-bit)
+      0x64: raw payload
+    """
+    chunk_len = len(chunk_data)
+    total_len = chunk_len + 100
+    buf = bytearray(total_len)
+    struct.pack_into(">I", buf, 0, total_len)     # total_len
+    struct.pack_into(">I", buf, 4, 1)             # proto_type = 1
+    struct.pack_into(">I", buf, 8, 4)             # cmd = 4 (Data Chunk)
+    struct.pack_into(">Q", buf, 0x34, token)      # 64-bit token BE
+    struct.pack_into(">Q", buf, 0x3c, file_size)  # 64-bit file size BE
+    struct.pack_into(">Q", buf, 0x44, offset)     # 64-bit offset BE
+    struct.pack_into(">I", buf, 0x4c, chunk_len)  # 32-bit chunk len BE
+    buf[0x64 : 0x64 + chunk_len] = chunk_data
+    return bytes(buf)
+
+
+def parse_folder_tran_packet(data: bytes) -> Optional[dict]:
+    """Parse incoming CFolderTranEngine packet (Command 1, 2, 3, or 4)."""
+    if len(data) < 12:
+        return None
+    total_len = struct.unpack(">I", data[:4])[0]
+    p_type = struct.unpack(">I", data[4:8])[0]
+    p_cmd = struct.unpack(">I", data[8:12])[0]
+    res = {"total_len": total_len, "type": p_type, "cmd": p_cmd}
+    if p_cmd == 1 and len(data) >= 12:
+        # Command 1: Download Request
+        # 1. Check for binary token at offset 0x34
+        if len(data) >= 0x3C:
+            tok = struct.unpack(">Q", data[0x34:0x3c])[0]
+            if tok != 0:
+                res["token"] = tok
+        # 2. Check for ASCII JSON / text format
+        import re
+        m = re.search(rb'(\d+)\|([0-9a-fA-F]{32})', data)
+        if m:
+            res["token"] = int(m.group(1))
+            res["md5"] = m.group(2).decode("ascii").lower()
+        else:
+            m_v = re.search(rb'"v"\s*:\s*"([0-9a-fA-F]{32})"', data)
+            if m_v:
+                res["md5"] = m_v.group(1).decode("ascii").lower()
+    elif p_cmd == 2 and len(data) >= 0x4C:
+        # Command 2: Download Response
+        res["token"] = struct.unpack(">Q", data[0x34:0x3c])[0]
+        res["file_size"] = struct.unpack(">Q", data[0x3c:0x44])[0]
+        res["chunk_size"] = struct.unpack(">Q", data[0x44:0x4c])[0]
+    elif p_cmd == 3 and len(data) >= 0x44:
+        # Command 3: Chunk Request from receiver
+        res["token"] = struct.unpack(">Q", data[0x34:0x3c])[0]
+        res["offset"] = struct.unpack(">Q", data[0x3c:0x44])[0]
+        if len(data) >= 0x4C:
+            res["chunk_len"] = struct.unpack(">Q", data[0x44:0x4c])[0]
+    elif p_cmd == 4 and len(data) >= 0x64:
+        # Command 4: Data Chunk
+        res["token"] = struct.unpack(">Q", data[0x34:0x3c])[0]
+        res["file_size"] = struct.unpack(">Q", data[0x3c:0x44])[0]
+        res["offset"] = struct.unpack(">Q", data[0x44:0x4c])[0]
+        chunk_len_32 = struct.unpack(">I", data[0x4c:0x50])[0]
+        res["chunk_len"] = chunk_len_32
+        res["chunk_data"] = data[0x64 : 0x64 + chunk_len_32]
+    return res
+
+
 def parse_minifile_packet(data: bytes) -> Optional[dict]:
     """Parse incoming Mini-File packet header and extract command and metadata."""
     if len(data) < 12:
@@ -802,6 +899,7 @@ class LanBridgeTester:
         self.image_sent = False
         self.file_sent = False
         self.pending_images: dict[str, bytes] = {}
+        self.pending_tokens: dict[int, str] = {}
         self.pending_files: dict[int, dict] = {}
         self.peer_file_port: Optional[int] = None
         self.peer_reverse_port: Optional[int] = None
@@ -844,44 +942,114 @@ class LanBridgeTester:
         self.tcp_buffers: dict[socket.socket, bytearray] = {}
         self.minifile_served: set[str] = set()
 
-    def send_minifile_stream(self, sock: socket.socket, md5_hex: str) -> bool:
-        """Stream an image file to a connected TCP socket using Command 2 (Rsp) + Command 3 (Chunks)."""
+    def send_minifile_stream(
+        self,
+        sock: socket.socket,
+        md5_hex: str,
+        token: int = 0,
+        is_folder_tran: bool = True,
+    ) -> bool:
+        """Stream an image file to a connected TCP socket.
+
+        Supports:
+        - CFolderTranEngine (Default for native chat images, Cmd 1 500B -> Cmd 2 108B -> Cmd 3 108B -> Cmd 4 data).
+        - CLanFileTran (Legacy/alternative, Cmd 1 344B -> Cmd 2 356B -> Cmd 3 data).
+        """
         img_data = self.pending_images.get(md5_hex)
         if not img_data:
             logger.warning("[TCP:STREAM] Image MD5 %s not found in pending_images!", md5_hex)
             return False
 
+        file_size = len(img_data)
+        engine_name = "CFolderTranEngine" if is_folder_tran else "CLanFileTran"
         logger.info("=" * 65)
-        logger.info("[TCP:STREAM] >>> STARTING MINI-FILE STREAM: MD5=%s, Size=%dB", md5_hex, len(img_data))
+        logger.info(
+            "[TCP:STREAM] >>> STARTING MINI-FILE STREAM: MD5=%s, Size=%dB, Token=%d, Engine=%s",
+            md5_hex, file_size, token, engine_name
+        )
         logger.info("=" * 65)
         try:
             # Set socket to blocking mode for reliable transmission
             sock.setblocking(True)
             sock.settimeout(5.0)
 
-            # 1. Send Command 2 (Download Response, 356 bytes)
-            rsp = build_minifile_response(md5_hex.lower(), len(img_data), status=0)
-            sock.sendall(rsp)
-            logger.info("[TCP:STREAM] >>> Sent Command 2 (Response header 356B)")
+            if is_folder_tran:
+                # 1. Send Command 2 (CFolderTranEngine Response, 108 bytes with token)
+                rsp = build_folder_tran_response(file_size=file_size, token=token, chunk_size=16384)
+                sock.sendall(rsp)
+                logger.info("[TCP:STREAM] >>> Sent CFolderTranEngine Command 2 (108B, token=%d, size=%d)", token, file_size)
 
-            # 2. Send Command 3 (Data Chunks, 16384 bytes each)
-            chunk_size = 16384
-            offset = 0
-            chunk_idx = 1
-            while offset < len(img_data):
-                piece = img_data[offset:offset + chunk_size]
-                chunk_pkt = build_minifile_chunk(len(img_data), offset, piece)
-                sock.sendall(chunk_pkt)
-                logger.debug(
-                    "[TCP:STREAM] >>> Sent Chunk #%d (offset=%d, len=%dB, total_pkt=%dB)",
-                    chunk_idx, offset, len(piece), len(chunk_pkt)
-                )
-                offset += len(piece)
-                chunk_idx += 1
-                time.sleep(0.005)
+                # 2. Wait for Command 3 (108 bytes Chunk Request from Sandbox)
+                leftover = bytes(self.tcp_buffers.get(sock, bytearray()))
+                if sock in self.tcp_buffers:
+                    self.tcp_buffers[sock].clear()
+
+                cmd3_buf = bytearray(leftover)
+                while len(cmd3_buf) < 108:
+                    try:
+                        part = sock.recv(108 - len(cmd3_buf))
+                        if not part:
+                            break
+                        cmd3_buf.extend(part)
+                    except socket.timeout:
+                        break
+
+                start_offset = 0
+                if len(cmd3_buf) >= 12:
+                    cmd3_pkt = parse_folder_tran_packet(bytes(cmd3_buf))
+                    if cmd3_pkt and cmd3_pkt.get("cmd") == 3:
+                        start_offset = cmd3_pkt.get("offset", 0)
+                        cli_token = cmd3_pkt.get("token", 0)
+                        if cli_token:
+                            token = cli_token
+                        logger.info(
+                            "[TCP:STREAM] <<< Received Command 3 from client: token=%d, offset=%d",
+                            token, start_offset
+                        )
+                    else:
+                        logger.warning("[TCP:STREAM] Received unexpected packet instead of Command 3: %s", cmd3_buf[:12].hex())
+                else:
+                    logger.warning("[TCP:STREAM] Did not receive complete Command 3, proceeding from offset 0")
+
+                # 3. Stream Command 4 (Data Chunks, 16384 bytes each)
+                chunk_size = 16384
+                offset = start_offset
+                chunk_idx = 1
+                while offset < file_size:
+                    piece = img_data[offset : offset + chunk_size]
+                    chunk_pkt = build_folder_tran_chunk(file_size=file_size, offset=offset, chunk_data=piece, token=token)
+                    sock.sendall(chunk_pkt)
+                    logger.debug(
+                        "[TCP:STREAM] >>> Sent Command 4 Chunk #%d (token=%d, offset=%d, len=%dB, total_pkt=%dB)",
+                        chunk_idx, token, offset, len(piece), len(chunk_pkt)
+                    )
+                    offset += len(piece)
+                    chunk_idx += 1
+                    time.sleep(0.005)
+
+            else:
+                # CLanFileTran mode
+                rsp = build_minifile_response(md5_hex.lower(), file_size, status=0)
+                sock.sendall(rsp)
+                logger.info("[TCP:STREAM] >>> Sent CLanFileTran Command 2 (356B)")
+
+                chunk_size = 16384
+                offset = 0
+                chunk_idx = 1
+                while offset < file_size:
+                    piece = img_data[offset : offset + chunk_size]
+                    chunk_pkt = build_minifile_chunk(file_size, offset, piece)
+                    sock.sendall(chunk_pkt)
+                    logger.debug(
+                        "[TCP:STREAM] >>> Sent Chunk #%d (offset=%d, len=%dB, total_pkt=%dB)",
+                        chunk_idx, offset, len(piece), len(chunk_pkt)
+                    )
+                    offset += len(piece)
+                    chunk_idx += 1
+                    time.sleep(0.005)
 
             logger.info("*" * 65)
-            logger.info("[TCP:STREAM] >>> ALL CHUNKS SENT SUCCESSFULLY! (%d bytes total)", len(img_data))
+            logger.info("[TCP:STREAM] >>> ALL CHUNKS SENT SUCCESSFULLY! (%d bytes total)", file_size)
             logger.info("*" * 65)
             self.minifile_served.add(md5_hex.lower())
             return True
@@ -1064,6 +1232,7 @@ class LanBridgeTester:
         self.pending_images[img_md5] = img_data
 
         token = random.randint(10000, 30000)
+        self.pending_tokens[token] = img_md5
         env = build_x_send_image_envelope(
             img_md5=img_md5,
             token=token,
@@ -1564,19 +1733,32 @@ class LanBridgeTester:
                                 logger.info("[TCP:%s] Chunk ASCII: %s", peer_desc, chunk.decode("latin1", errors="replace"))
                             except Exception:
                                 pass
-                            # Check for Mini-File protocol command 1 (Download Request)
-                            minifile_pkt = parse_minifile_packet(bytes(self.tcp_buffers[s]))
-                            if minifile_pkt and minifile_pkt.get("cmd") == 1 and "md5" in minifile_pkt:
-                                req_md5 = minifile_pkt["md5"].lower()
-                                logger.info("=" * 65)
-                                logger.info("[TCP:MINIFILE] <<< RECEIVED DOWNLOAD REQUEST (CMD 1) FOR MD5: %s", req_md5)
-                                logger.info("=" * 65)
-                                req_len = minifile_pkt["total_len"]
-                                del self.tcp_buffers[s][:req_len]
-                                if self.send_minifile_stream(s, req_md5):
-                                    logger.info("[TCP:MINIFILE] Image stream completed for MD5 %s", req_md5)
-                                else:
-                                    logger.warning("[TCP:MINIFILE] Failed to stream image for MD5 %s", req_md5)
+                            # Check for Mini-File / Image protocol command 1 (Download Request)
+                            minifile_pkt = parse_folder_tran_packet(bytes(self.tcp_buffers[s])) or parse_minifile_packet(bytes(self.tcp_buffers[s]))
+                            if minifile_pkt and minifile_pkt.get("cmd") == 1:
+                                req_token = minifile_pkt.get("token", 0)
+                                req_md5 = minifile_pkt.get("md5")
+                                if not req_md5 and req_token in self.pending_tokens:
+                                    req_md5 = self.pending_tokens[req_token]
+                                elif not req_md5 and len(self.pending_images) == 1:
+                                    req_md5 = next(iter(self.pending_images.keys()))
+
+                                if req_md5:
+                                    req_md5 = req_md5.lower()
+                                    req_len = minifile_pkt["total_len"]
+                                    is_folder_tran = (req_len == 500 or req_len >= 400)
+                                    engine_name = "CFolderTranEngine" if is_folder_tran else "CLanFileTran"
+                                    logger.info("=" * 65)
+                                    logger.info(
+                                        "[TCP:MINIFILE] <<< RECEIVED DOWNLOAD REQUEST (CMD 1) FOR MD5: %s (token=%d, total_len=%d, engine=%s)",
+                                        req_md5, req_token, req_len, engine_name
+                                    )
+                                    logger.info("=" * 65)
+                                    del self.tcp_buffers[s][:req_len]
+                                    if self.send_minifile_stream(s, req_md5, token=req_token, is_folder_tran=is_folder_tran):
+                                        logger.info("[TCP:MINIFILE] Image stream completed for MD5 %s", req_md5)
+                                    else:
+                                        logger.warning("[TCP:MINIFILE] Failed to stream image for MD5 %s", req_md5)
 
                             saved_img = check_and_save_image(bytes(self.tcp_buffers[s]))
                             if saved_img:

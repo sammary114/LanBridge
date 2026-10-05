@@ -241,7 +241,7 @@ ip.addr == 47.57.13.180 && tcp.port == 80
 -   `docs/protocol-notes.md`：帧号、时间、五元组、字段偏移及置信度剖析。
 -   `docs/experiments.md`：分阶段抓包方案与假设验证清单。
 -   `tools/pcap-analyzer/`：PCAPNG 分析器 CLI、会话聚合与 JSON 导出工具。
--   `tests/`：自动化测试套件（52 个测试全部通过）。
+-   `tests/`：自动化测试套件（53 个测试全部通过）。
 -   `reports/`：导出的机器可读协议分析结果。
 
 **当前状态**：
@@ -250,11 +250,12 @@ ip.addr == 47.57.13.180 && tcp.port == 80
 - 协议核心全链路彻底破解与定型：
   * **传输层**：底层 100% 对应 **ENet** 可靠 UDP 协议（0x82 Connect / 0x83 VerifyConnect / 0x01 ACK / 0x85 Ping / 0x86 SendReliable / 0x88 SendFragment / 0x8a BandwidthLimit）。
   * **密码层**：原生 XML 载荷与封包 100% 对应 **XTEA 密码机**（32 轮，硬编码 128 位密钥 `b'8asfhj@k7*20hbla'`），全面支持 GBK 编码与双向加解密。
-  * **微文件/图片传输层 (Mini-File)**：彻底逆向破解客户端 TCP 图片传输引擎（`FILE_TRAN_TCP_PORT`，Command 1/2/3 二进制帧协议与磁盘 MD5 校验状态机）。
+  * **微文件/图片传输层 (Mini-File / Folder-Tran)**：彻底逆向破解客户端 TCP 聊天内嵌图片与文件传输引擎（`CFolderTranEngine`，108B Command 2 / 108B Command 3 / 偏移 0x64 Command 4 分片流式传输与 MD5 校验状态机）。
 - **M4 里程碑全面交付**：
   * 实现完整原生客户端模拟器（`tools/net-tester/tester.py`、`enet_protocol.py`、`crypto_engine.py`）。
   * 成功在 Windows Sandbox 原生**“内网通联系人”**分组下点亮 `LanBridge-Bot` 并带有绿色在线徽标。
   * 成功通过 UDP 9012 完成双向原生文本聊天交互与送达确认（收到 Sandbox 发送的 `"123456"` 并自动回显应答）。
-  * 成功实现从宿主机向 Sandbox 原生客户端发送图库图片（`images.jpg`），经 Mini-File TCP 端口分片传送并由原生客户端全量接收渲染。
-  * 52 项自动化测试全部通过（52/52 PASS）。
+  * 彻底攻克聊天图片破损图标（42x42）难题，成功实现从宿主机向 Sandbox 原生客户端发送图库高清图片（`images.jpg`），经 `CFolderTranEngine` TCP 端口分片传送并由原生客户端全量接收渲染。
+  * 53 项自动化测试全部通过（53/53 PASS）。
 - **当前最优先任务**：推进 M5 核心客户端开发，将逆向成果与协议栈提炼为通用 SDK / 客户端库。
+

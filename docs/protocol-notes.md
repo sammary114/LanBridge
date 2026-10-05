@@ -605,3 +605,89 @@ Sender (Host :13603)                                Receiver (Sandbox :49761)
 2. **分块写入**（`0x005a4d3a`）：从 Command 3 中解出 `chunk_len = ntohl([edi + 0x80])`，直接调用 Win32 `WriteFile` 将 `[edi + 0x98]` 写入磁盘文件，并累加当前已接收字节数 `[ebp + 0x58]`。
 3. **完成与 MD5 校验**（`0x00594fc0`）：当累加字节数达到总大小时，调用 `0x00594db0` 计算下载文件的磁盘 MD5，通过 `_stricmp` 与预期 MD5 对比。匹配后通知 UI 显示并复位连接。
 
+---
+
+### 8.4 原生聊天内嵌图片真实传输引擎（CFolderTranEngine）与破损图标根因剖析
+
+在实际聊天场景中，当对端收到带有 `{"img": {"t": "feihu", "v": "{token}|{md5}"}}` 的富文本消息时，客户端并不调用 `CLanFileTran`，而是由 `CFolderTranEngine`（`ShiYeLine.exe: 0x00647050~0x00647b20`）主导微文件拉取！
+
+#### 1. 破损图片（42x42 图标）的三大根本原因
+1. **传输引擎与指令序列不匹配**：
+   - 接收端发起 TCP 连接并发送 500 字节的 **Command 1**（携带 64 位大端 `token`）。
+   - 若发送方按照 `CLanFileTran` 规范回复 356 字节的 Command 2，接收端 `0x00647662` 检查报文长度不符合 108 字节预期，直接触发 TCP RST 断开，并在重试 4 次失败后，UI 降级显示破损图片占位图标（42x42）。
+2. **关键头部字段偏移混淆**：
+   - `CFolderTranEngine` 的 Command 2 与 Command 4 的关键字段偏移与 `CLanFileTran` 完全不同：
+     - **偏移 `0x34` (uint64 BE)**：必须是 **`token`**（即消息体内的随机 token / task_id）。
+     - **偏移 `0x3c` (uint64 BE)**：Command 2 / Command 4 中为 **`file_size`**。
+     - **偏移 `0x44` (uint64 BE)**：Command 2 中为 `chunk_size`（16384），Command 4 中为 `offset`。
+     - **偏移 `0x4c` (uint32 BE)**：Command 4 中为本次分片长度 `chunk_len`。
+     - **偏移 `0x64`（100 字节处）**：才是 Command 4 的真实图像原始二进制数据载荷（汇编 `0x0064780c: add esi, 0x64; call WriteFile`）。
+   - 此前若将 `file_size` 错置于 `0x34`，接收端解得 `token = file_size`、`file_size = 0`，导致本地创建 0 字节空文件，Windows GDI+ 图像解码失败。
+3. **基于 Token 的会话寻址机制**：
+   - 原生客户端发起的 500 字节 Command 1 请求在偏移 `0x34` 处仅存放 64 位整型 `token`，并不包含明文字符串 MD5。服务端必须维护 `token -> md5` 的映射表，才能精准命中待传输的图片载荷。
+
+#### 2. CFolderTranEngine 报文协议规范
+
+```text
+Sender (Host :13603)                                Receiver (Sandbox :49761)
+       |                                                    |
+       |<--- TCP SYN ---------------------------------------|
+       |---> TCP SYN+ACK -----------------------------------|
+       |<--- TCP ACK ---------------------------------------|
+       |                                                    |
+       |<--- Command 1: Download Request (500B, Token) -----|
+       |---> Command 2: Download Response (108B, Token, Sz)-|
+       |<--- Command 3: Chunk Request (108B, Token, Off=0) -|
+       |---> Command 4: Data Chunk 1 (Len+100B, Off=0) -----|
+       |---> Command 4: Data Chunk 2 (Len+100B, Off=16384) -|
+       |---> Command 4: Data Chunk N (Final Chunk) ---------|
+       |<--- TCP FIN / CloseHandle (MD5 match -> UI render)-|
+```
+
+##### Command 1：下载请求（Download Request，500 字节，接收端 -> 发送端）
+* 长度：固定 500 字节（`total_len = 500, proto_type = 1, cmd_id = 1`）。
+* 偏移 `0x34 ~ 0x3B` (uint64 BE)：请求的图片/微文件 `token`。
+
+##### Command 2：下载响应（Download Response，固定 108 字节，发送端 -> 接收端）
+* 汇编位置：`ShiYeLine.exe` `0x00646c70`
+* 长度：固定 108 字节（`total_len = 108, proto_type = 1, cmd_id = 2`）。
+* 字段布局：
+  - `0x00 ~ 0x03`：`total_len = 108` (uint32 BE)
+  - `0x04 ~ 0x07`：`proto_type = 1` (uint32 BE)
+  - `0x08 ~ 0x0B`：`cmd_id = 2` (uint32 BE)
+  - `0x34 ~ 0x3B`：`token` (uint64 BE)
+  - `0x3C ~ 0x43`：`file_size` (uint64 BE)
+  - `0x44 ~ 0x4B`：`chunk_size` (uint64 BE，通常为 16384)
+
+##### Command 3：分块请求（Chunk Request，固定 108 字节，接收端 -> 发送端）
+* 汇编位置：`ShiYeLine.exe` `0x00646d00`
+* 长度：固定 108 字节（`total_len = 108, proto_type = 1, cmd_id = 3`）。
+* 字段布局：
+  - `0x00 ~ 0x03`：`total_len = 108` (uint32 BE)
+  - `0x04 ~ 0x07`：`proto_type = 1` (uint32 BE)
+  - `0x08 ~ 0x0B`：`cmd_id = 3` (uint32 BE)
+  - `0x34 ~ 0x3B`：`token` (uint64 BE)
+  - `0x3C ~ 0x43`：`start_offset` (uint64 BE，初始为 0)
+  - `0x44 ~ 0x4B`：`chunk_len` (uint64 BE，请求分片大小，通常为 16384)
+
+##### Command 4：数据分片载荷（Data Chunk，长度 = `chunk_len + 100` 字节，发送端 -> 接收端）
+* 汇编位置：`ShiYeLine.exe` `0x00646d80`（构造）与 `0x006477b0`（接收写入）
+* 字段布局：
+  - `0x00 ~ 0x03`：`total_len = chunk_len + 100` (uint32 BE)
+  - `0x04 ~ 0x07`：`proto_type = 1` (uint32 BE)
+  - `0x08 ~ 0x0B`：`cmd_id = 4` (uint32 BE)
+  - `0x34 ~ 0x3B`：`token` (uint64 BE)
+  - `0x3C ~ 0x43`：`file_size` (uint64 BE，文件总字节数)
+  - `0x44 ~ 0x4B`：`offset` (uint64 BE，当前分片在文件中的起始偏移量)
+  - `0x4C ~ 0x4F`：`chunk_len` (uint32 BE，当前分片有效数据字节数)
+  - `0x64 ~ 0x64+chunk_len`：真正的图像二进制数据（`WriteFile` 写入目标）。
+
+#### 3. 现场实测闭环验证
+通过向 Windows Sandbox（`172.31.120.125`）发送真实测试图片 `images.jpg`（53,201 字节，MD5: `d66e6ae5761641b65764b7d183ff7169`）：
+- Sandbox 建立 TCP 连接，发出 Command 1（500B）。
+- LanBridge 宿主机回复 Command 2（108B）。
+- Sandbox 回应 Command 3（108B，`offset=0`）。
+- LanBridge 流式发送 4 个 Command 4 数据切片（16384 + 16384 + 16384 + 4049 字节）。
+- Sandbox 接收完毕，校验 MD5 成功，主动优雅关闭连接，并在原生聊天窗口中完美渲染高清原图！
+
+
