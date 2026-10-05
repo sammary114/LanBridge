@@ -241,7 +241,7 @@ ip.addr == 47.57.13.180 && tcp.port == 80
 -   `docs/protocol-notes.md`：帧号、时间、五元组、字段偏移及置信度剖析。
 -   `docs/experiments.md`：分阶段抓包方案与假设验证清单。
 -   `tools/pcap-analyzer/`：PCAPNG 分析器 CLI、会话聚合与 JSON 导出工具。
--   `tests/`：自动化测试套件（67 个测试全部通过）。
+- `tests/`：自动化测试套件（80 个测试全部通过）。
 -   `reports/`：导出的机器可读协议分析结果。
 
 **当前状态**：
@@ -260,6 +260,10 @@ ip.addr == 47.57.13.180 && tcp.port == 80
   * 将协议核心抽象并提炼为生产级通用模块化库 `lanbridge`（`lanbridge.client.LanBridgeClient`、`lanbridge.protocol.*`、`lanbridge.discovery.SubnetScanner`、`lanbridge.models.*`）。
   * 完善单大文件传输引擎（`CLanFileTran`，TCP 2440）Command 1/2/3 切片传输与 MD5 校验状态机。
   * 实现基于 CIDR 的跨网段多目标并发异步主动扫描器（`SubnetScanner`）。
-  * 自动化测试扩展至 67 项，全量通过（67/67 PASS）。
+- **局域网群文件共享空间与影子保活（Shadow Keeper）全面交付**：
+  * 逆向还原并实现 TCP 2442 原生共享协议族（`X_SHARE_*` XML 信令、目录树同步、密码校验与切片流式分发）。
+  * 实现群文件主动发布与撤销通知（`X_QGROUP_SHARE_FILE` 与 `X_QGROUP_DELETE_SHARE`）。
+  * 首创引入 **LanBridge-Hub 影子保活（Shadow Keeper Failover）**与**阶梯式 TTL / LRU 磁盘配额清理机制**（<10MB 保留 14 天；10MB~100MB 保留 7 天；>100MB 保留 48 小时；LRU 自动淘汰至 70% 水位）。
+  * 自动化测试扩展至 **80 项**，全量通过（80/80 PASS）。
 - **当前最优先任务**：推进 M6 应用层客户端开发（现代化轻量 Web 客户端 / 极客终端 TUI 客户端 / 开放 Bot 网关）。
 
