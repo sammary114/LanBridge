@@ -73,6 +73,21 @@ from lanbridge.protocol.file_tran import (
     parse_minifile_packet,
     check_and_save_image,
 )
+from lanbridge.protocol.share_tran import (
+    ShareOpcode,
+    build_x_share_subnet_envelope,
+    build_x_share_get_remote_root_envelope,
+    build_x_share_get_remote_root_rsp_envelope,
+    build_x_share_get_remote_envelope,
+    build_x_share_get_remote_rsp_envelope,
+    build_x_share_check_pwd_envelope,
+    build_x_share_check_pwd_rsp_envelope,
+    build_x_share_download_file_envelope,
+    build_x_share_download_file_rsp_envelope,
+    build_x_qgroup_share_file_envelope,
+    build_x_qgroup_delete_share_envelope,
+    parse_share_xml,
+)
 
 __all__ = [
     "XteaEngine",
@@ -131,4 +146,18 @@ __all__ = [
     "build_minifile_chunk",
     "parse_minifile_packet",
     "check_and_save_image",
+    "ShareOpcode",
+    "build_x_share_subnet_envelope",
+    "build_x_share_get_remote_root_envelope",
+    "build_x_share_get_remote_root_rsp_envelope",
+    "build_x_share_get_remote_envelope",
+    "build_x_share_get_remote_rsp_envelope",
+    "build_x_share_check_pwd_envelope",
+    "build_x_share_check_pwd_rsp_envelope",
+    "build_x_share_download_file_envelope",
+    "build_x_share_download_file_rsp_envelope",
+    "build_x_qgroup_share_file_envelope",
+    "build_x_qgroup_delete_share_envelope",
+    "parse_share_xml",
 ]
+

@@ -6,7 +6,7 @@ __version__ = "0.5.0"
 
 from lanbridge.client import LanBridgeClient
 from lanbridge.discovery import SubnetScanner
-from lanbridge.models import ChatMessage, Contact, FileTask
+from lanbridge.models import ChatMessage, Contact, FileTask, GroupSharedFile
 from lanbridge.protocol import (
     AesEngine,
     BlowfishEngine,
@@ -24,6 +24,8 @@ from lanbridge.protocol import (
     build_nwt_discovery_packet,
     build_x_flash_screen_envelope,
     build_x_heartbeat_envelope,
+    build_x_qgroup_delete_share_envelope,
+    build_x_qgroup_share_file_envelope,
     build_x_ready_envelope,
     build_x_send_image_envelope,
     build_x_send_msg_ack_envelope,
@@ -33,6 +35,7 @@ from lanbridge.protocol import (
     parse_discovery_packet,
     parse_folder_tran_packet,
     parse_minifile_packet,
+    ShareOpcode,
 )
 
 __all__ = [
@@ -42,6 +45,7 @@ __all__ = [
     "Contact",
     "ChatMessage",
     "FileTask",
+    "GroupSharedFile",
     "XteaEngine",
     "BlowfishEngine",
     "AesEngine",
@@ -66,4 +70,7 @@ __all__ = [
     "build_minifile_response",
     "build_minifile_chunk",
     "parse_minifile_packet",
+    "ShareOpcode",
+    "build_x_qgroup_share_file_envelope",
+    "build_x_qgroup_delete_share_envelope",
 ]

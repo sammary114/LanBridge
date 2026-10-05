@@ -18,9 +18,9 @@ import random
 import socket
 import struct
 import time
-from typing import Callable, Dict, List, Optional, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
-from lanbridge.models import ChatMessage, Contact, FileTask
+from lanbridge.models import ChatMessage, Contact, FileTask, GroupSharedFile
 from lanbridge.protocol import (
     DEFAULT_GROUP,
     DEFAULT_GUID,
@@ -29,11 +29,14 @@ from lanbridge.protocol import (
     DEFAULT_VERSION,
     ENetCommandType,
     ENetProtocolSession,
+    ShareOpcode,
     XteaEngine,
     build_ack_response,
     build_folder_tran_chunk,
     build_folder_tran_response,
     build_handshake_reply,
+    build_minifile_chunk,
+    build_minifile_response,
     build_native_profile,
     build_nwt_discovery_packet,
     build_opcode_01,
@@ -42,15 +45,25 @@ from lanbridge.protocol import (
     build_opcode_8a,
     build_x_flash_screen_envelope,
     build_x_heartbeat_envelope,
+    build_x_qgroup_delete_share_envelope,
+    build_x_qgroup_share_file_envelope,
     build_x_ready_envelope,
     build_x_send_image_envelope,
     build_x_send_msg_ack_envelope,
     build_x_send_msg_envelope,
+    build_x_share_check_pwd_rsp_envelope,
+    build_x_share_download_file_envelope,
+    build_x_share_download_file_rsp_envelope,
+    build_x_share_get_remote_root_rsp_envelope,
+    build_x_share_get_remote_rsp_envelope,
     extract_chat_message,
     extract_msg_id,
     parse_discovery_packet,
     parse_folder_tran_packet,
+    parse_minifile_packet,
+    parse_share_xml,
 )
+
 
 logger = logging.getLogger("lanbridge.client")
 
@@ -69,6 +82,13 @@ class LanBridgeClient:
         main_port: int = 9012,
         dynamic_port: int = 53782,
         tcp_file_port: int = 9013,
+        share_port: int = 2442,
+        share_dir: str = "./shared_files",
+        enable_shadow_keeper: bool = True,
+        cache_ttl_days: float = 7.0,
+        max_cache_size_bytes: int = 10 * 1024 * 1024 * 1024,
+        tiered_ttl_enabled: bool = True,
+        shadow_max_filesize: int = 100 * 1024 * 1024,
     ) -> None:
         self.local_ip = local_ip
         self.broadcast_ip = broadcast_ip
@@ -80,23 +100,35 @@ class LanBridgeClient:
         self.main_port = main_port
         self.dynamic_port = dynamic_port
         self.tcp_file_port = tcp_file_port
+        self.share_port = share_port
+        self.share_dir = os.path.abspath(share_dir)
+        os.makedirs(self.share_dir, exist_ok=True)
+        self.enable_shadow_keeper = enable_shadow_keeper
+        self.cache_ttl_days = cache_ttl_days
+        self.max_cache_size_bytes = max_cache_size_bytes
+        self.tiered_ttl_enabled = tiered_ttl_enabled
+        self.shadow_max_filesize = shadow_max_filesize
 
         self.xtea = XteaEngine()
         self.sessions: Dict[str, ENetProtocolSession] = {}
         self.contacts: Dict[str, Contact] = {}
         self.pending_images: Dict[str, bytes] = {}  # md5 -> bytes
         self.pending_tokens: Dict[int, str] = {}    # token -> md5
+        self.group_shared_files: Dict[str, Dict[str, GroupSharedFile]] = {}  # qgroup_id -> {md5: GroupSharedFile}
+        self.local_shared_files: Dict[str, GroupSharedFile] = {}  # md5 -> GroupSharedFile
 
         # Event callbacks
         self._on_message_handlers: List[Callable[[ChatMessage], None]] = []
         self._on_contact_online_handlers: List[Callable[[Contact], None]] = []
         self._on_contact_offline_handlers: List[Callable[[Contact], None]] = []
+        self._on_group_file_shared_handlers: List[Callable[[GroupSharedFile], None]] = []
 
         self._running = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._udp_9011_transport: Optional[asyncio.DatagramTransport] = None
         self._udp_9012_transport: Optional[asyncio.DatagramTransport] = None
         self._tcp_server: Optional[asyncio.Server] = None
+        self._tcp_share_server: Optional[asyncio.Server] = None
         self._bg_tasks: List[asyncio.Task] = []
 
     def on_message(self, handler: Callable[[ChatMessage], None]) -> Callable[[ChatMessage], None]:
@@ -113,6 +145,19 @@ class LanBridgeClient:
         """Register a callback when a contact goes offline."""
         self._on_contact_offline_handlers.append(handler)
         return handler
+
+    def on_group_file_shared(self, handler: Callable[[GroupSharedFile], None]) -> Callable[[GroupSharedFile], None]:
+        """Register a callback when a file is actively shared in a group."""
+        self._on_group_file_shared_handlers.append(handler)
+        return handler
+
+    def emit_group_file_shared(self, shared_file: GroupSharedFile) -> None:
+        for handler in self._on_group_file_shared_handlers:
+            try:
+                handler(shared_file)
+            except Exception as e:
+                logger.error("Error in on_group_file_shared handler: %s", e)
+
 
     def get_session(self, peer_ip: str) -> ENetProtocolSession:
         """Get or initialize reliable ENet session for peer IP."""
@@ -330,6 +375,57 @@ class LanBridgeClient:
             ready_env = build_x_ready_envelope(self.user_id)
             replies.extend(build_opcode_88_fragments(ready_env))
 
+        # Group File Share Announcement (X_QGROUP_SHARE_FILE)
+        elif opcode == ShareOpcode.X_QGROUP_SHARE_FILE or "<X_QGROUP_SHARE_FILE" in xml_str:
+            share_dict = parse_share_xml(xml_str)
+            qgroup_id = share_dict.get("qgroup_id", "0")
+            file_name = share_dict.get("file_name", "unnamed.dat")
+            file_size = int(share_dict.get("file_size", "0"))
+            file_md5 = share_dict.get("file_md5", "").lower()
+            uploader_id = share_dict.get("uploader_id", "unknown")
+            uploader_name = share_dict.get("uploader_name", "Unknown")
+            tcp_port = int(share_dict.get("tcp_port", "2442"))
+            pwd_protect = share_dict.get("pwd_protect", "0") == "1"
+
+            if file_md5:
+                gsf = GroupSharedFile(
+                    file_id=file_md5,
+                    qgroup_id=qgroup_id,
+                    filename=file_name,
+                    filesize=file_size,
+                    file_md5=file_md5,
+                    uploader_id=uploader_id,
+                    uploader_name=uploader_name,
+                    uploader_ip=peer_ip,
+                    share_port=tcp_port,
+                    created_time=time.time(),
+                    pwd_protect=pwd_protect,
+                )
+                self.group_shared_files.setdefault(qgroup_id, {})[file_md5] = gsf
+                self.emit_group_file_shared(gsf)
+
+                # Shadow keeper background pre-caching
+                if self.enable_shadow_keeper and not gsf.is_cached and gsf.filesize <= self.shadow_max_filesize:
+                    if self._loop and self._loop.is_running():
+                        t = asyncio.create_task(self._shadow_cache_task(gsf))
+                        self._bg_tasks.append(t)
+
+        # Group File Revocation (X_QGROUP_DELETE_SHARE)
+        elif opcode == ShareOpcode.X_QGROUP_DELETE_SHARE or "<X_QGROUP_DELETE_SHARE" in xml_str:
+            del_dict = parse_share_xml(xml_str)
+            qgroup_id = del_dict.get("qgroup_id", "0")
+            file_md5 = del_dict.get("file_md5", "").lower()
+            if qgroup_id in self.group_shared_files and file_md5 in self.group_shared_files[qgroup_id]:
+                del self.group_shared_files[qgroup_id][file_md5]
+            if file_md5 in self.local_shared_files:
+                local_file = self.local_shared_files.pop(file_md5)
+                if local_file.local_path and os.path.exists(local_file.local_path):
+                    try:
+                        os.remove(local_file.local_path)
+                    except Exception as e:
+                        logger.warning("Failed removing deleted shared file %s: %s", local_file.local_path, e)
+
+
     # -------------------------------------------------------------------------
     # Asynchronous Network Loop
     # -------------------------------------------------------------------------
@@ -388,11 +484,24 @@ class LanBridgeClient:
             self.tcp_file_port,
         )
 
+        # 4. Start TCP 2442 File Share Server
+        try:
+            self._tcp_share_server = await asyncio.start_server(
+                self._handle_tcp_share_client,
+                self.local_ip,
+                self.share_port,
+            )
+            logger.info("TCP Share Server listening on %s:%d", self.local_ip, self.share_port)
+        except Exception as e:
+            logger.warning("Could not bind TCP share port %d: %s", self.share_port, e)
+
         logger.info(
-            "LanBridgeClient started: UDP 9011/9012 & TCP %d on %s",
+            "LanBridgeClient started: UDP 9011/9012 & TCP %d (Mini-File), TCP %d (Share) on %s",
             self.tcp_file_port,
+            self.share_port,
             self.local_ip,
         )
+
 
     async def _handle_tcp_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         """Handle incoming TCP connections for CFolderTranEngine / CLanFileTran image downloads."""
@@ -451,6 +560,465 @@ class LanBridgeClient:
             writer.close()
             await writer.wait_closed()
 
+    async def _handle_tcp_share_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        """Handle incoming TCP 2442 connections (X_SHARE_* XML requests & CLanFileTran downloads)."""
+        peer = writer.get_extra_info("peername")
+        logger.debug("[TCP 2442] Share client connected: %s", peer)
+
+        try:
+            chunk = await asyncio.wait_for(reader.read(4096), timeout=5.0)
+            if not chunk:
+                return
+            req_buf = bytearray(chunk)
+
+            # Check if this is an XTEA envelope (Opcode 0x0401..0x0420)
+            # In Nwt XTEA envelope: [tot_len (4B), opcode (4B), ciphertext...]
+            is_xtea = False
+            if len(req_buf) >= 8:
+                tot_len, op = struct.unpack(">2I", req_buf[:8])
+                if 0x0400 <= op <= 0x0420:
+                    is_xtea = True
+
+            if is_xtea:
+                tot_len, op = struct.unpack(">2I", req_buf[:8])
+                while len(req_buf) < tot_len:
+                    more = await asyncio.wait_for(reader.read(tot_len - len(req_buf)), timeout=5.0)
+                    if not more:
+                        break
+                    req_buf.extend(more)
+
+                opcode, plaintext = self.xtea.parse_envelope(bytes(req_buf))
+                xml_str = plaintext.decode("gbk", errors="replace")
+                parsed = parse_share_xml(xml_str)
+                req_id = int(parsed.get("req_id", 1))
+                logger.debug("[TCP 2442] XTEA envelope Opcode=0x%04x: %s", opcode, xml_str[:120])
+
+                if opcode == ShareOpcode.X_SHARE_GET_REMOTE_ROOT:
+                    catalogs = [
+                        {"id": "1", "name": "群共享空间", "lastm": int(time.time()), "createt": int(time.time()), "valid": True}
+                    ]
+                    rsp = build_x_share_get_remote_root_rsp_envelope(catalogs, req_id=req_id)
+                    writer.write(rsp)
+                    await writer.drain()
+
+                elif opcode == ShareOpcode.X_SHARE_GET_REMOTE:
+                    files = []
+                    for gsf in self.local_shared_files.values():
+                        files.append({
+                            "id": gsf.file_id,
+                            "name": gsf.filename,
+                            "size": gsf.filesize,
+                            "md5": gsf.file_md5,
+                            "lastm": int(gsf.created_time),
+                        })
+                    rsp = build_x_share_get_remote_rsp_envelope(files, req_id=req_id)
+                    writer.write(rsp)
+                    await writer.drain()
+
+                elif opcode == ShareOpcode.X_SHARE_CHECK_PWD:
+                    rsp = build_x_share_check_pwd_rsp_envelope(err=0, req_id=req_id)
+                    writer.write(rsp)
+                    await writer.drain()
+
+                elif opcode == ShareOpcode.X_SHARE_DOWNLOAD_FILE:
+                    target_fid = (parsed.get("file_id") or "").lower()
+                    target_file = self.local_shared_files.get(target_fid)
+                    if not target_file:
+                        for f in self.local_shared_files.values():
+                            if f.filename == parsed.get("file_path"):
+                                target_file = f
+                                break
+                    if target_file:
+                        rsp = build_x_share_download_file_rsp_envelope(target_file.filesize, target_file.file_md5, err=0, req_id=req_id)
+                    else:
+                        rsp = build_x_share_download_file_rsp_envelope(0, "", err=1, req_id=req_id)
+                    writer.write(rsp)
+                    await writer.drain()
+
+            else:
+                # Binary CLanFileTran Command 1 packet (344 bytes)
+                total_len = struct.unpack(">I", req_buf[:4])[0] if len(req_buf) >= 4 else 344
+                while len(req_buf) < total_len:
+                    more = await asyncio.wait_for(reader.read(total_len - len(req_buf)), timeout=5.0)
+                    if not more:
+                        break
+                    req_buf.extend(more)
+
+                pkt = parse_minifile_packet(bytes(req_buf))
+                if pkt and pkt.get("cmd") == 1:
+                    req_md5 = pkt.get("md5")
+                    if not req_md5 and len(self.local_shared_files) == 1:
+                        req_md5 = next(iter(self.local_shared_files.keys()))
+
+                    target_file = self.local_shared_files.get(req_md5) if req_md5 else None
+                    if target_file and target_file.local_path and os.path.isfile(target_file.local_path):
+                        file_path = target_file.local_path
+                        file_size = os.path.getsize(file_path)
+
+                        # Send Command 2 (356B response)
+                        rsp_2 = build_minifile_response(target_file.file_md5, file_size, status=0)
+                        writer.write(rsp_2)
+                        await writer.drain()
+
+                        # Stream Command 3 Chunks (16KB)
+                        chunk_size = 16384
+                        offset = 0
+                        with open(file_path, "rb") as f:
+                            while offset < file_size:
+                                piece = f.read(chunk_size)
+                                if not piece:
+                                    break
+                                chunk_pkt = build_minifile_chunk(file_size, offset, piece)
+                                writer.write(chunk_pkt)
+                                await writer.drain()
+                                offset += len(piece)
+                                await asyncio.sleep(0.001)
+
+                        target_file.last_accessed = time.time()
+                        logger.info("[TCP 2442] Streamed shared file completed: MD5=%s (%d bytes)", req_md5, file_size)
+                    else:
+                        rsp_2 = build_minifile_response(req_md5 or "0" * 32, 0, status=1)
+                        writer.write(rsp_2)
+                        await writer.drain()
+
+        except Exception as e:
+            logger.error("[TCP 2442] Error handling share client: %s", e)
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+
+    def get_cache_ttl_for_file(self, filesize: int) -> float:
+        """Calculate cache retention TTL in seconds based on file size tiered policy."""
+        if not self.tiered_ttl_enabled:
+            return self.cache_ttl_days * 86400.0
+
+        # Tiered retention policy:
+        # < 10 MB: 14 days (1209600s)
+        # 10 MB ~ 100 MB: 7 days (604800s)
+        # > 100 MB: 2 days (48 hours, 172800s)
+        if filesize < 10 * 1024 * 1024:
+            return 14 * 86400.0
+        elif filesize <= 100 * 1024 * 1024:
+            return 7 * 86400.0
+        else:
+            return 2 * 86400.0
+
+    def clean_expired_cache(self, current_time: Optional[float] = None) -> List[str]:
+        """Evict expired cached files based on tiered TTL and LRU disk quota."""
+        now = current_time if current_time is not None else time.time()
+        purged_md5s: List[str] = []
+
+        # 1. TTL-based expiration
+        for md5, gsf in list(self.local_shared_files.items()):
+            ttl = self.get_cache_ttl_for_file(gsf.filesize)
+            if gsf.is_expired(ttl, now):
+                if gsf.local_path and os.path.exists(gsf.local_path):
+                    try:
+                        os.remove(gsf.local_path)
+                    except Exception as e:
+                        logger.warning("Failed to delete expired cache file %s: %s", gsf.local_path, e)
+                gsf.is_cached = False
+                self.local_shared_files.pop(md5, None)
+                purged_md5s.append(md5)
+                logger.info("[CacheCleaner] Expired file evicted: %s (MD5=%s)", gsf.filename, md5)
+
+        # 2. Disk Quota & LRU Eviction
+        cached_files = [f for f in self.local_shared_files.values() if f.is_cached and not f.is_pinned]
+        total_size = sum(f.filesize for f in cached_files)
+
+        if total_size > self.max_cache_size_bytes:
+            # Sort by last_accessed ascending (LRU)
+            cached_files.sort(key=lambda x: x.last_accessed)
+            target_size = int(self.max_cache_size_bytes * 0.70)
+            for gsf in cached_files:
+                if total_size <= target_size:
+                    break
+                if gsf.local_path and os.path.exists(gsf.local_path):
+                    try:
+                        os.remove(gsf.local_path)
+                    except Exception as e:
+                        logger.warning("Failed to remove LRU file %s: %s", gsf.local_path, e)
+                gsf.is_cached = False
+                total_size -= gsf.filesize
+                self.local_shared_files.pop(gsf.file_md5, None)
+                purged_md5s.append(gsf.file_md5)
+                logger.info("[CacheCleaner] LRU evicted file: %s (MD5=%s)", gsf.filename, gsf.file_md5)
+
+        return purged_md5s
+
+    async def share_file_to_group(
+        self,
+        qgroup_id: str,
+        file_path: str,
+        target_ip: Optional[str] = None,
+    ) -> GroupSharedFile:
+        """Actively share a local file to a group, publishing X_QGROUP_SHARE_FILE."""
+        abs_path = os.path.abspath(file_path)
+        if not os.path.isfile(abs_path):
+            raise FileNotFoundError(f"File not found: {abs_path}")
+
+        filesize = os.path.getsize(abs_path)
+        with open(abs_path, "rb") as f:
+            file_md5 = hashlib.md5(f.read()).hexdigest().lower()
+
+        filename = os.path.basename(abs_path)
+        now = time.time()
+
+        gsf = GroupSharedFile(
+            file_id=file_md5,
+            qgroup_id=qgroup_id,
+            filename=filename,
+            filesize=filesize,
+            file_md5=file_md5,
+            uploader_id=self.user_id,
+            uploader_name=self.nickname,
+            uploader_ip=self.local_ip,
+            share_port=self.share_port,
+            created_time=now,
+            local_path=abs_path,
+            is_cached=True,
+            last_accessed=now,
+            is_pinned=True,  # Shared by this user, protected against LRU
+        )
+
+        self.local_shared_files[file_md5] = gsf
+        self.group_shared_files.setdefault(qgroup_id, {})[file_md5] = gsf
+
+        # Broadcast or send X_QGROUP_SHARE_FILE envelope
+        env = build_x_qgroup_share_file_envelope(
+            qgroup_id=qgroup_id,
+            file_name=filename,
+            file_size=filesize,
+            file_md5=file_md5,
+            uploader_id=self.user_id,
+            uploader_name=self.nickname,
+            tcp_port=self.share_port,
+            timestamp=int(now),
+        )
+        frags = build_opcode_88_fragments(env)
+        dest_ip = target_ip if target_ip else self.broadcast_ip
+        if self._udp_9012_transport:
+            for frag in frags:
+                self._udp_9012_transport.sendto(frag, (dest_ip, self.main_port))
+            logger.info(
+                "Shared file '%s' to group %s (MD5=%s, Size=%d bytes) -> %s",
+                filename,
+                qgroup_id,
+                file_md5,
+                filesize,
+                dest_ip,
+            )
+
+        return gsf
+
+    async def delete_group_shared_file(
+        self,
+        qgroup_id: str,
+        file_md5: str,
+        target_ip: Optional[str] = None,
+    ) -> None:
+        """Revoke a shared group file and broadcast X_QGROUP_DELETE_SHARE."""
+        file_md5 = file_md5.lower()
+        if qgroup_id in self.group_shared_files:
+            self.group_shared_files[qgroup_id].pop(file_md5, None)
+        self.local_shared_files.pop(file_md5, None)
+
+        env = build_x_qgroup_delete_share_envelope(
+            qgroup_id=qgroup_id,
+            file_md5=file_md5,
+            uploader_id=self.user_id,
+        )
+        frags = build_opcode_88_fragments(env)
+        dest_ip = target_ip if target_ip else self.broadcast_ip
+        if self._udp_9012_transport:
+            for frag in frags:
+                self._udp_9012_transport.sendto(frag, (dest_ip, self.main_port))
+            logger.info("Sent delete share notice for %s in group %s -> %s", file_md5, qgroup_id, dest_ip)
+
+    async def download_shared_file(
+        self,
+        shared_file: GroupSharedFile,
+        target_dir: Optional[str] = None,
+        failover_candidates: Optional[List[Union[str, Tuple[str, int]]]] = None,
+        failover_ips: Optional[List[Union[str, Tuple[str, int]]]] = None,
+    ) -> str:
+        """Download a shared file via TCP 2442 with automatic Shadow Keeper Failover."""
+        if target_dir is None:
+            target_dir = self.share_dir
+        os.makedirs(target_dir, exist_ok=True)
+
+        safe_filename = os.path.basename(shared_file.filename)
+        if not safe_filename or safe_filename in (".", ".."):
+            safe_filename = f"file_{shared_file.file_md5[:8]}.dat"
+        dest_path = os.path.join(target_dir, safe_filename)
+
+        candidates: List[Tuple[str, int]] = []
+        if shared_file.uploader_ip:
+            candidates.append((shared_file.uploader_ip, shared_file.share_port or 2442))
+
+        f_list = failover_candidates or failover_ips or []
+        for item in f_list:
+            if isinstance(item, tuple):
+                ep = (item[0], item[1])
+            else:
+                ep = (item, shared_file.share_port or 2442)
+            if ep not in candidates:
+                candidates.append(ep)
+
+        for contact in self.contacts.values():
+            if contact.ip:
+                ep = (contact.ip, 2442)
+                if ep not in candidates:
+                    candidates.append(ep)
+
+        success = False
+        last_error: Optional[Exception] = None
+
+        for host, port in candidates:
+            temp_path = dest_path + f".tmp_{int(time.time())}"
+            try:
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(host, port),
+                    timeout=3.0,
+                )
+            except Exception as e:
+                logger.debug("Failed connecting to %s:%d for file %s: %s", host, port, shared_file.filename, e)
+                last_error = e
+                continue
+
+            try:
+                # 1. Send Command 1 Request (344 bytes)
+                req_pkt = bytearray(344)
+                struct.pack_into(">I", req_pkt, 0, 344)
+                struct.pack_into(">I", req_pkt, 4, 1)
+                struct.pack_into(">I", req_pkt, 8, 1)  # Command 1: Download Request
+                md5_b = shared_file.file_md5.encode("ascii")
+                req_pkt[0x70 : 0x70 + len(md5_b)] = md5_b
+                sig = f"|{shared_file.file_md5}".encode("ascii")
+                req_pkt[0x90 : 0x90 + len(sig)] = sig
+
+                writer.write(bytes(req_pkt))
+                await writer.drain()
+
+                # 2. Read Command 2 Response (356 bytes)
+                rsp2_buf = bytearray()
+                while len(rsp2_buf) < 356:
+                    chunk = await asyncio.wait_for(reader.read(356 - len(rsp2_buf)), timeout=5.0)
+                    if not chunk:
+                        break
+                    rsp2_buf.extend(chunk)
+
+                if len(rsp2_buf) < 356:
+                    raise IOError("Incomplete Command 2 response from server")
+
+                rsp_pkt = parse_minifile_packet(bytes(rsp2_buf))
+                if not rsp_pkt or rsp_pkt.get("cmd") != 2:
+                    raise IOError("Invalid response packet (expected Cmd 2)")
+                if rsp_pkt.get("status") != 0:
+                    raise IOError(f"Server rejected file download, status={rsp_pkt.get('status')}")
+
+                file_size = rsp_pkt.get("file_size", shared_file.filesize)
+
+                # 3. Read Command 3 Data Chunks
+                hasher = hashlib.md5()
+                recv_size = 0
+                with open(temp_path, "wb") as f_out:
+                    while recv_size < file_size:
+                        header_buf = bytearray()
+                        while len(header_buf) < 0x98:
+                            ch = await asyncio.wait_for(reader.read(0x98 - len(header_buf)), timeout=5.0)
+                            if not ch:
+                                break
+                            header_buf.extend(ch)
+                        if len(header_buf) < 0x98:
+                            break
+
+                        cmd3_meta = parse_minifile_packet(bytes(header_buf))
+                        if not cmd3_meta or cmd3_meta.get("cmd") != 3:
+                            break
+
+                        chunk_len = cmd3_meta.get("chunk_len", 0)
+                        data_buf = bytearray()
+                        while len(data_buf) < chunk_len:
+                            ch = await asyncio.wait_for(reader.read(chunk_len - len(data_buf)), timeout=5.0)
+                            if not ch:
+                                break
+                            data_buf.extend(ch)
+                        if len(data_buf) < chunk_len:
+                            break
+
+                        f_out.write(data_buf)
+                        hasher.update(data_buf)
+                        recv_size += len(data_buf)
+
+                if recv_size == file_size:
+                    calc_md5 = hasher.hexdigest().lower()
+                    if calc_md5 == shared_file.file_md5.lower():
+                        if os.path.exists(dest_path):
+                            try:
+                                os.remove(dest_path)
+                            except Exception:
+                                pass
+                        os.replace(temp_path, dest_path)
+                        shared_file.local_path = dest_path
+                        shared_file.is_cached = True
+                        shared_file.last_accessed = time.time()
+                        self.local_shared_files[shared_file.file_md5] = shared_file
+                        success = True
+                        logger.info(
+                            "Downloaded shared file '%s' from %s:%d successfully (%d bytes, MD5=%s)",
+                            shared_file.filename,
+                            host,
+                            port,
+                            file_size,
+                            calc_md5,
+                        )
+                        break
+                    else:
+                        raise ValueError(f"MD5 mismatch: expected {shared_file.file_md5}, got {calc_md5}")
+                else:
+                    raise IOError(f"Incomplete download: {recv_size}/{file_size} bytes")
+
+            except Exception as e:
+                logger.warning("Download failed from %s:%d: %s", host, port, e)
+                last_error = e
+                if os.path.exists(temp_path):
+                    try:
+                        os.remove(temp_path)
+                    except Exception:
+                        pass
+            finally:
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+
+        if not success:
+            raise RuntimeError(
+                f"Failed to download shared file '{shared_file.filename}' from any candidate: {last_error}"
+            )
+        return dest_path
+
+    async def _shadow_cache_task(self, shared_file: GroupSharedFile) -> None:
+        """Background task for Shadow Keeper: pre-cache group shared files."""
+        try:
+            logger.info(
+                "[ShadowKeeper] Pre-caching file '%s' (MD5=%s, Size=%d bytes) from %s:%d",
+                shared_file.filename,
+                shared_file.file_md5,
+                shared_file.filesize,
+                shared_file.uploader_ip,
+                shared_file.share_port,
+            )
+            await self.download_shared_file(shared_file)
+            logger.info("[ShadowKeeper] Pre-cached file successfully: %s", shared_file.filename)
+        except Exception as e:
+            logger.debug("[ShadowKeeper] Background cache skipped or failed for %s: %s", shared_file.filename, e)
+
     async def broadcast_presence(self) -> None:
         """Send a UDP 9011 presence broadcast to announce online status."""
         pkt = build_nwt_discovery_packet(
@@ -505,6 +1073,9 @@ class LanBridgeClient:
     async def stop(self) -> None:
         """Shut down the client and release network resources."""
         self._running = False
+        for task in self._bg_tasks:
+            if not task.done():
+                task.cancel()
         if self._udp_9011_transport:
             self._udp_9011_transport.close()
         if self._udp_9012_transport:
@@ -512,4 +1083,7 @@ class LanBridgeClient:
         if self._tcp_server:
             self._tcp_server.close()
             await self._tcp_server.wait_closed()
+        if self._tcp_share_server:
+            self._tcp_share_server.close()
+            await self._tcp_share_server.wait_closed()
         logger.info("LanBridgeClient stopped.")
