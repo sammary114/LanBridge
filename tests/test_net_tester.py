@@ -43,6 +43,10 @@ from tester import (  # noqa: E402
     build_x_operate_send_file_envelope,
     build_x_progress_recv_file_envelope,
     build_x_recall_msg_envelope,
+    build_x_send_image_envelope,
+    build_minifile_response,
+    build_minifile_chunk,
+    parse_minifile_packet,
     extract_chat_message,
 )
 from crypto_engine import (  # noqa: E402
@@ -472,7 +476,47 @@ class TestNetTester(unittest.TestCase):
         self.assertIn('&quot;t&quot;&nbsp;:&nbsp;&quot;recall&quot;', xml)
         self.assertIn('&quot;target_id&quot;&nbsp;:&nbsp;&quot;uuid-12345&quot;', xml)
 
+    def test_build_x_send_image_envelope(self) -> None:
+        """Verify inline image envelope generation (Opcode 0x03ec, feihu format)."""
+        engine = XteaEngine()
+        test_md5 = "d66e6ae5761641b65764b7d183ff7169"
+        env = build_x_send_image_envelope(img_md5=test_md5, token=12345, caption="Test Image")
+        op, dec = engine.parse_envelope(env)
+        self.assertEqual(op, 0x03EC)
+        xml = dec.decode("utf-8")
+        self.assertIn('&quot;t&quot;&nbsp;:&nbsp;&quot;feihu&quot;', xml)
+        self.assertIn(f'12345|{test_md5}', xml)
+        self.assertIn('Test&nbsp;Image', xml)
+
+    def test_minifile_protocol_roundtrip(self) -> None:
+        """Verify Mini-File Command 2 (Response), Command 3 (Chunk), and parser roundtrip."""
+        test_md5 = "d66e6ae5761641b65764b7d183ff7169"
+        file_size = 53201
+
+        # 1. Test Command 2 Response
+        rsp = build_minifile_response(test_md5, file_size, status=0)
+        self.assertEqual(len(rsp), 356)
+        parsed_rsp = parse_minifile_packet(rsp)
+        self.assertIsNotNone(parsed_rsp)
+        self.assertEqual(parsed_rsp["cmd"], 2)
+        self.assertEqual(parsed_rsp["status"], 0)
+        self.assertEqual(parsed_rsp["md5"], test_md5)
+        self.assertEqual(parsed_rsp["file_size"], file_size)
+
+        # 2. Test Command 3 Data Chunk
+        sample_data = b"JFIF_IMAGE_BYTES_12345"
+        chunk_pkt = build_minifile_chunk(file_size, offset=100, chunk_data=sample_data)
+        self.assertEqual(len(chunk_pkt), len(sample_data) + 0x98)
+        parsed_chk = parse_minifile_packet(chunk_pkt)
+        self.assertIsNotNone(parsed_chk)
+        self.assertEqual(parsed_chk["cmd"], 3)
+        self.assertEqual(parsed_chk["file_size"], file_size)
+        self.assertEqual(parsed_chk["offset"], 100)
+        self.assertEqual(parsed_chk["chunk_len"], len(sample_data))
+        self.assertEqual(parsed_chk["chunk_data"], sample_data)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

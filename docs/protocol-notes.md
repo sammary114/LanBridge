@@ -516,4 +516,92 @@ Sandbox (172.31.122.254)                         Host (172.31.112.1)
 3. **初次握手时序生命周期**：从 9011 广播 -> 9012 与动态端口双通道同步 -> Stage 5 `<X_HANDSHARK>` 资料同步 -> 共享凭据锁定 7 个阶段全部理清。
 4. **原生聊天报文通道定性**：确证文本消息运行于 UDP 9012，通过 Opcode 0x88 分片封包，根标签为 `<X_SEND_MSG>`。
 5. **密码引擎底层定型**：确证 `0x0085167e` 算法分流器（`none` / `aes` / `blowfish`），并完成基于 PyCryptodome 的 `crypto_engine.py` 实现。
+6. **图片/微文件 (Mini-File) TCP 传输协议**：完全逆向确证图片在原生客户端间的点对点 TCP 传输协议（Command 1/2/3 格式与 `CLanFileTran::DoDownTask` 状态机），并经 `05-image-transfer.pcapng` 真实抓包校验。
+
+---
+
+## 8. 微文件与图片点对点传输协议（Mini-File TCP Protocol）
+
+### 8.1 传输机制与生命周期
+内网通原生客户端在聊天中发送的图片、截图、自定义表情等微文件，并不通过 UDP 9012 直接传输数据载荷，而是采用 **“UDP 元数据通告 + TCP 点对点拉取”** 的分层设计：
+
+1. **UDP 元数据通告**：发送方在 UDP 9012 的 `<X_SEND_MSG>` 报文中嵌入图片元数据（JSON 格式）：
+   ```json
+   {
+       "app": "shiyeline",
+       "dt": [
+           {
+               "img": {
+                   "t": "feihu",
+                   "v": "{token}|{md5_hex}"
+               }
+           }
+       ],
+       "ver": "6.0"
+   }
+   ```
+2. **TCP 端口协商**：接收方根据握手阶段 `<X_HANDSHARK><NET><FILE_TRAN_TCP_PORT>` 记录的发送方 TCP 端口（或本地动态端口），发起 TCP 主动连接。
+3. **TCP 请求与应答**：
+   - 接收方发送 **Command 1 (Download Request)**，指定目标图片的 MD5 哈希。
+   - 发送方返回 **Command 2 (Download Response)**，确认文件存在并通告文件总字节数。
+   - 发送方分块发送 **Command 3 (Data Chunk)**（典型块大小 16KB）。
+4. **接收端完整性校验**：接收端接收完毕后，调用 `0x594fc0` 计算本地落地文件的 MD5，并与请求的 MD5 执行 `_stricmp` 匹配。匹配成功后通知 UI 渲染图片，并关闭/重置 TCP 连接。
+
+```text
+Sender (Host :13603)                                Receiver (Sandbox :49761)
+       |                                                    |
+       |<--- TCP SYN ---------------------------------------|
+       |---> TCP SYN+ACK -----------------------------------|
+       |<--- TCP ACK ---------------------------------------|
+       |                                                    |
+       |<--- Command 1: Download Request (MD5) -------------|
+       |---> Command 2: Download Response (Size, Status=0) -|
+       |---> Command 3: Data Chunk 0 (0 ~ 16384) -----------|
+       |<--- TCP ACK ---------------------------------------|
+       |---> Command 3: Data Chunk 1 (16384 ~ 32768) -------|
+       |<--- TCP ACK ---------------------------------------|
+       |---> Command 3: Data Chunk N (Final Chunk) ---------|
+       |<--- TCP ACK ---------------------------------------|
+       |<--- TCP RST+ACK (Task Success / Socket Recycle) ---|
+```
+
+### 8.2 二进制报文格式剖析
+
+所有 Mini-File 报文均具有固定的 12 字节外层头部：
+
+| 偏移（Offset） | 长度（Bytes） | 字节序 | 字段名 | 说明 |
+| :--- | :--- | :--- | :--- | :--- |
+| `0x00 ~ 0x03` | 4 | Big Endian | `total_len` | 整个报文总长度（含此 12 字节头部） |
+| `0x04 ~ 0x07` | 4 | Big Endian | `proto_type` | 固定为 `0x00000001`（Mini-File 协议标识） |
+| `0x08 ~ 0x0B` | 4 | Big Endian | `cmd_id` | 命令 ID（`1`: 请求, `2`: 响应, `3`: 数据块） |
+
+#### 1. Command 1：下载请求报文（Download Request，344 字节 / 500 字节）
+- **汇编构造函数**：`ShiYeLine.exe` `0x005aa5c0`
+- **字段布局**：
+  - `0x00 ~ 0x0B`：基础头部（`cmd_id = 1`）。
+  - `0x70 ~ 0x8F`：目标文件的 32 字节 MD5 十六进制字符串（或在聊天场景中内嵌 `{"v": "{token}|{md5}"}` 的 JSON 字符串）。
+
+#### 2. Command 2：下载响应报文（Download Response，固定 356 字节）
+- **汇编构造函数**：`ShiYeLine.exe` `0x005aa6e0`
+- **字段布局**：
+  - `0x00 ~ 0x0B`：基础头部（`cmd_id = 2`，`total_len = 356`）。
+  - `0x70 ~ 0x73`：`status`（4 字节 Big Endian，`0` 表示成功/文件就绪，非 0 为错误）。
+  - `0x74 ~ 0x93`：`file_md5`（32 字节 ASCII 十六进制小写 MD5 字符串）。
+  - `0x94 ~ 0x9B`：`file_size`（8 字节 Big Endian，64 位文件总字节数）。
+
+#### 3. Command 3：数据块分片报文（Data Chunk，长度 = `ChunkLen + 0x98`）
+- **汇编构造函数**：`ShiYeLine.exe` `0x005aa820`
+- **字段布局**：
+  - `0x00 ~ 0x0B`：基础头部（`cmd_id = 3`，`total_len = ChunkLen + 152`）。
+  - `0x70 ~ 0x77`：`file_size`（8 字节 Big Endian，64 位文件总字节数）。
+  - `0x78 ~ 0x7F`：`file_offset`（8 字节 Big Endian，64 位当前分块起始偏移量）。
+  - `0x80 ~ 0x83`：`chunk_len`（4 字节 Big Endian，当前分块数据有效载荷长度）。
+  - `0x98 ~ ...`：`chunk_data`（原始二进制数据，长度等于 `chunk_len`）。
+
+### 8.3 接收端核心状态机与校验逆向
+在 `ShiYeLine.exe` 中，接收端处理流程完全位于 `CLanFileTran::DoDownTask`（`0x005a44b0` / `0x005a4aa3`）：
+
+1. **响应解析**（`0x005a4c19`）：检查 `status == 0`，调用 `0x005927d0` 将 `0x94` 处的 64 位大端字节序转换为本地整数，并调用 `CreateFileA` 创建临时缓存文件。
+2. **分块写入**（`0x005a4d3a`）：从 Command 3 中解出 `chunk_len = ntohl([edi + 0x80])`，直接调用 Win32 `WriteFile` 将 `[edi + 0x98]` 写入磁盘文件，并累加当前已接收字节数 `[ebp + 0x58]`。
+3. **完成与 MD5 校验**（`0x00594fc0`）：当累加字节数达到总大小时，调用 `0x00594db0` 计算下载文件的磁盘 MD5，通过 `_stricmp` 与预期 MD5 对比。匹配后通知 UI 显示并复位连接。
 

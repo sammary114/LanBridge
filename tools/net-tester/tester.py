@@ -460,6 +460,78 @@ def build_x_recall_msg_envelope(
     return xtea_engine.build_envelope(0x03EC, xml, encoding="utf-8")
 
 
+def build_x_send_image_envelope(
+    img_md5: str,
+    token: int = 1001,
+    caption: str = "",
+    msg_id: int = 1,
+    img_type: str = "feihu",
+    timestamp: Optional[int] = None,
+) -> bytes:
+    """Build authentic encrypted X_SEND_MSG (Opcode 1004 / 0x03ec) envelope containing an inline image."""
+    import json, uuid
+    if timestamp is None:
+        timestamp = int(time.time())
+
+    val = f"{token}|{img_md5}" if img_type == "feihu" else img_md5
+    dt = [{"img": {"t": img_type, "v": val}}]
+    if caption:
+        dt.append({"txt": {"t": "normal", "v": caption}})
+
+    msg_json = json.dumps(
+        {
+            "app": "shiyeline",
+            "dt": dt,
+            "ft": {
+                "b": "0",
+                "c": "0x000000",
+                "i": "0",
+                "n": "微软雅黑",
+                "s": "9",
+                "u": "0",
+            },
+            "id": uuid.uuid4().hex,
+            "type": "0",
+            "ver": "6.0",
+        },
+        ensure_ascii=False,
+        indent=3,
+        separators=(",", " : "),
+    )
+    escaped_msg = msg_json.replace('"', '&quot;').replace(' ', '&nbsp;') + "\n"
+    xml = (
+        f'<X_SEND_MSG docver="1"><MSG_ID>{msg_id}</MSG_ID><RECEIPT>0</RECEIPT>'
+        f'<MSG>{escaped_msg}</MSG>'
+        f'<MSG_TIME>{timestamp}</MSG_TIME><OFFLINE>0</OFFLINE><HIDE_RECORD>0</HIDE_RECORD></X_SEND_MSG>'
+    )
+    return xtea_engine.build_envelope(0x03EC, xml, encoding="utf-8")
+
+
+def build_x_send_file_envelope(
+    filename: str,
+    size: int,
+    task_id: int = 1,
+    file_id: int = 1,
+    last_modify: Optional[int] = None,
+) -> bytes:
+    """Build authentic encrypted X_SEND_FILE (Opcode 1009 / 0x03f1) envelope."""
+    if last_modify is None:
+        last_modify = int(time.time())
+    xml = (
+        f'<X_SEND_FILE docver="1">'
+        f'<TASK_ID>{task_id}</TASK_ID>'
+        f'<FILE_ID>{file_id}</FILE_ID>'
+        f'<NAME>{filename}</NAME>'
+        f'<PWD></PWD>'
+        f'<SIZE>{size}</SIZE>'
+        f'<LAST_MODIFY>{last_modify}</LAST_MODIFY>'
+        f'<OFFLINE>0</OFFLINE>'
+        f'</X_SEND_FILE>'
+    )
+    return xtea_engine.build_envelope(0x03F1, xml, encoding="gbk")
+
+
+
 def build_x_send_msg(
     message: str,
     msg_id: int = 10001,
@@ -601,6 +673,70 @@ def build_ack_response(req_packet: bytes) -> Optional[bytes]:
     return None
 
 
+def build_minifile_response(md5_hex: str, file_size: int, status: int = 0) -> bytes:
+    """Build authentic 356-byte Mini-File / Image download response packet (Command 2)."""
+    buf = bytearray(356)
+    struct.pack_into(">I", buf, 0, 356)
+    struct.pack_into(">I", buf, 4, 1)
+    struct.pack_into(">I", buf, 8, 2)  # Command 2: Response
+    struct.pack_into(">I", buf, 0x70, status)  # Status: 0 = OK
+    md5_b = md5_hex.encode("ascii")
+    buf[0x74:0x74 + len(md5_b)] = md5_b
+    struct.pack_into(">Q", buf, 0x94, file_size)  # 64-bit big-endian file size
+    return bytes(buf)
+
+
+def build_minifile_chunk(file_size: int, offset: int, chunk_data: bytes) -> bytes:
+    """Build authentic Mini-File / Image data chunk packet (Command 3)."""
+    chunk_len = len(chunk_data)
+    total_len = chunk_len + 0x98
+    buf = bytearray(total_len)
+    struct.pack_into(">I", buf, 0, total_len)
+    struct.pack_into(">I", buf, 4, 1)
+    struct.pack_into(">I", buf, 8, 3)  # Command 3: Data Chunk
+    struct.pack_into(">Q", buf, 0x70, file_size)  # 64-bit file size
+    struct.pack_into(">Q", buf, 0x78, offset)  # 64-bit chunk offset
+    struct.pack_into(">I", buf, 0x80, chunk_len)  # 32-bit chunk length
+    buf[0x98:0x98 + chunk_len] = chunk_data
+    return bytes(buf)
+
+
+def parse_minifile_packet(data: bytes) -> Optional[dict]:
+    """Parse incoming Mini-File packet header and extract command and metadata."""
+    if len(data) < 12:
+        return None
+    total_len = struct.unpack(">I", data[:4])[0]
+    p_type = struct.unpack(">I", data[4:8])[0]
+    p_cmd = struct.unpack(">I", data[8:12])[0]
+    res = {"total_len": total_len, "type": p_type, "cmd": p_cmd}
+    if p_cmd == 1 and len(data) >= 12:
+        # Command 1: Download Request
+        import re
+        m = re.search(rb'\|([0-9a-fA-F]{32})', data)
+        if m:
+            res["md5"] = m.group(1).decode("ascii").lower()
+        else:
+            m_v = re.search(rb'"v"\s*:\s*"([0-9a-fA-F]{32})"', data)
+            if m_v:
+                res["md5"] = m_v.group(1).decode("ascii").lower()
+            elif len(data) >= 0x90:
+                raw_md5 = data[0x70:0x90].decode("ascii", errors="ignore").strip("\x00")
+                if len(raw_md5) == 32 and all(c in "0123456789abcdefABCDEF" for c in raw_md5):
+                    res["md5"] = raw_md5.lower()
+    elif p_cmd == 2 and len(data) >= 356:
+        # Command 2: Download Response
+        res["status"] = struct.unpack(">I", data[0x70:0x74])[0]
+        res["md5"] = data[0x74:0x94].decode("ascii", errors="ignore").strip("\x00")
+        res["file_size"] = struct.unpack(">Q", data[0x94:0x9C])[0]
+    elif p_cmd == 3 and len(data) >= 0x98:
+        # Command 3: Data Chunk
+        res["file_size"] = struct.unpack(">Q", data[0x70:0x78])[0]
+        res["offset"] = struct.unpack(">Q", data[0x78:0x80])[0]
+        res["chunk_len"] = struct.unpack(">I", data[0x80:0x84])[0]
+        res["chunk_data"] = data[0x98:0x98 + res["chunk_len"]]
+    return res
+
+
 def check_and_save_image(raw_bytes: bytes, output_dir: Optional[str] = None) -> Optional[str]:
     """Detect image magic (PNG, JPG, GIF, BMP) in raw TCP payload and save to disk."""
     import uuid
@@ -645,6 +781,9 @@ class LanBridgeTester:
         group: str = DEFAULT_GROUP,
         dynamic_port: int = 53782,
         initial_msg: Optional[str] = None,
+        image_path: Optional[str] = None,
+        image_caption: str = "",
+        file_to_send: Optional[str] = None,
         mode: str = "native",
     ) -> None:
         self.sandbox_ip = sandbox_ip
@@ -655,7 +794,19 @@ class LanBridgeTester:
         self.group = group
         self.dynamic_port = dynamic_port
         self.initial_msg = initial_msg
+        self.image_path = image_path
+        self.image_caption = image_caption
+        self.file_to_send = file_to_send
         self.mode = mode.lower().strip()
+
+        self.image_sent = False
+        self.file_sent = False
+        self.pending_images: dict[str, bytes] = {}
+        self.pending_files: dict[int, dict] = {}
+        self.peer_file_port: Optional[int] = None
+        self.peer_reverse_port: Optional[int] = None
+
+
 
         self.sock_9011: Optional[socket.socket] = None
         self.sock_9012: Optional[socket.socket] = None
@@ -686,13 +837,65 @@ class LanBridgeTester:
         self.frag_assembler: dict[int, dict] = {}
         self.processed_msg_ids: set[int] = set()
 
-        # TCP 9013 P2P Image/File Transfer Server
-        self.sock_tcp9013: Optional[socket.socket] = None
+        # TCP P2P Image/File Transfer Servers (9013: Normal, 9015: Reverse, 13603: Sandbox Alt)
+        self.tcp_listeners: dict[int, socket.socket] = {}
         self.tcp_clients: List[socket.socket] = []
+        self.tcp_connecting: set[socket.socket] = set()
         self.tcp_buffers: dict[socket.socket, bytearray] = {}
+        self.minifile_served: set[str] = set()
+
+    def send_minifile_stream(self, sock: socket.socket, md5_hex: str) -> bool:
+        """Stream an image file to a connected TCP socket using Command 2 (Rsp) + Command 3 (Chunks)."""
+        img_data = self.pending_images.get(md5_hex)
+        if not img_data:
+            logger.warning("[TCP:STREAM] Image MD5 %s not found in pending_images!", md5_hex)
+            return False
+
+        logger.info("=" * 65)
+        logger.info("[TCP:STREAM] >>> STARTING MINI-FILE STREAM: MD5=%s, Size=%dB", md5_hex, len(img_data))
+        logger.info("=" * 65)
+        try:
+            # Set socket to blocking mode for reliable transmission
+            sock.setblocking(True)
+            sock.settimeout(5.0)
+
+            # 1. Send Command 2 (Download Response, 356 bytes)
+            rsp = build_minifile_response(md5_hex.lower(), len(img_data), status=0)
+            sock.sendall(rsp)
+            logger.info("[TCP:STREAM] >>> Sent Command 2 (Response header 356B)")
+
+            # 2. Send Command 3 (Data Chunks, 16384 bytes each)
+            chunk_size = 16384
+            offset = 0
+            chunk_idx = 1
+            while offset < len(img_data):
+                piece = img_data[offset:offset + chunk_size]
+                chunk_pkt = build_minifile_chunk(len(img_data), offset, piece)
+                sock.sendall(chunk_pkt)
+                logger.debug(
+                    "[TCP:STREAM] >>> Sent Chunk #%d (offset=%d, len=%dB, total_pkt=%dB)",
+                    chunk_idx, offset, len(piece), len(chunk_pkt)
+                )
+                offset += len(piece)
+                chunk_idx += 1
+                time.sleep(0.005)
+
+            logger.info("*" * 65)
+            logger.info("[TCP:STREAM] >>> ALL CHUNKS SENT SUCCESSFULLY! (%d bytes total)", len(img_data))
+            logger.info("*" * 65)
+            self.minifile_served.add(md5_hex.lower())
+            return True
+        except Exception as e:
+            logger.error("[TCP:STREAM] Stream error: %s", e)
+            return False
+        finally:
+            try:
+                sock.setblocking(False)
+            except Exception:
+                pass
 
     def init_sockets(self) -> None:
-        """Create and bind UDP sockets for ports 9011, 9012, dynamic, 2425, and TCP 9013."""
+        """Create and bind UDP sockets (9011, 9012, dynamic, 2425) and TCP listeners (9013-9016, 13603)."""
         def make_udp_socket(port: int) -> socket.socket:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -710,26 +913,34 @@ class LanBridgeTester:
         self.sock_dyn = make_udp_socket(self.dynamic_port)
         self.sock_2425 = make_udp_socket(2425)
 
-        # TCP 9013 listener
-        try:
-            self.sock_tcp9013 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock_tcp9013.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.sock_tcp9013.setblocking(False)
-            self.sock_tcp9013.bind((self.local_ip, 9013))
-            self.sock_tcp9013.listen(5)
-            logger.info("Bound TCP server on %s:9013 (Image/File Transfer)", self.local_ip)
-        except OSError as e:
-            logger.warning("Could not bind TCP 9013 on %s: %s", self.local_ip, e)
-            self.sock_tcp9013 = None
+        # TCP listeners on 9013 (File), 9014 (Folder), 9015 (Reverse File), 9016 (Reverse Folder), 13603 (Sandbox Alt)
+        for port in (9013, 9014, 9015, 9016, 13603):
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.setblocking(False)
+                s.bind((self.local_ip, port))
+                s.listen(5)
+                self.tcp_listeners[port] = s
+                desc = "Normal" if port == 9013 else ("Reverse File" if port == 9015 else f"Port {port}")
+                logger.info("Bound TCP server on %s:%d (%s)", self.local_ip, port, desc)
+            except OSError as e:
+                logger.warning("Could not bind TCP %d on %s: %s", port, self.local_ip, e)
 
     def close_sockets(self) -> None:
         """Close all sockets."""
-        for s in (self.sock_9011, self.sock_9012, self.sock_dyn, self.sock_2425, self.sock_tcp9013):
+        for s in (self.sock_9011, self.sock_9012, self.sock_dyn, self.sock_2425):
             if s:
                 try:
                     s.close()
                 except Exception:
                     pass
+        for s in self.tcp_listeners.values():
+            try:
+                s.close()
+            except Exception:
+                pass
+        self.tcp_listeners.clear()
         for c in self.tcp_clients:
             try:
                 c.close()
@@ -737,6 +948,7 @@ class LanBridgeTester:
                 pass
         self.tcp_clients.clear()
         self.tcp_buffers.clear()
+
 
     def send_discovery_broadcast(self) -> None:
         """Send 304B Nwt discovery frame to Sandbox unicast and subnet broadcast."""
@@ -803,16 +1015,13 @@ class LanBridgeTester:
             self.handshake_9012_started = True
             logger.info("[TX:9012] Sent ENet Connect 0x82 (cid=%s) to %s:9012", cid.hex(), self.sandbox_ip)
 
-    def send_native_chat_message(self, message: str, target_ip: Optional[str] = None) -> None:
-        """Send a native Nwt text message over UDP 9012 via XTEA-encrypted X_SEND_MSG."""
+    def send_native_envelope(self, env: bytes, target_ip: Optional[str] = None) -> None:
+        """Send an encrypted envelope over UDP 9012 via ENet (0x86 or 0x88 fragments)."""
         dst_ip = target_ip or self.sandbox_ip
         if not self.sock_9012:
             return
 
-        env = build_x_send_msg_envelope(message)
         tot_len = len(env)
-
-        # Send in Opcode 0x88 fragments (or 0x86 reliable if small enough)
         self.my_time = (self.my_time + 1) & 0xFFFF
         if tot_len <= 1372:
             hdr = struct.pack(">HH", self.header_flag, self.my_time)
@@ -832,9 +1041,70 @@ class LanBridgeTester:
                 self.packet_count_tx += 1
                 self.my_seq = (self.my_seq + 1) & 0xFFFF
 
+    def send_native_chat_message(self, message: str, target_ip: Optional[str] = None) -> None:
+        """Send a native Nwt text message over UDP 9012 via XTEA-encrypted X_SEND_MSG."""
+        env = build_x_send_msg_envelope(message)
+        self.send_native_envelope(env, target_ip)
         logger.info("=" * 65)
         logger.info("[CHAT:9012] >>> SENT NATIVE CHAT MESSAGE: \"%s\"", message)
         logger.info("=" * 65)
+
+    def send_native_image_message(
+        self,
+        image_path: str,
+        caption: str = "",
+        target_ip: Optional[str] = None,
+        img_type: str = "feihu",
+    ) -> None:
+        """Send an inline image message over UDP 9012."""
+        import hashlib
+        with open(image_path, "rb") as f:
+            img_data = f.read()
+        img_md5 = hashlib.md5(img_data).hexdigest()
+        self.pending_images[img_md5] = img_data
+
+        token = random.randint(10000, 30000)
+        env = build_x_send_image_envelope(
+            img_md5=img_md5,
+            token=token,
+            caption=caption,
+            img_type=img_type,
+        )
+        self.send_native_envelope(env, target_ip)
+        logger.info("=" * 65)
+        logger.info("[IMAGE:9012] >>> SENT INLINE IMAGE MESSAGE: MD5=%s (token=%d, size=%dB)", img_md5, token, len(img_data))
+        if caption:
+            logger.info("[IMAGE:9012] >>> CAPTION: \"%s\"", caption)
+        logger.info("=" * 65)
+
+    def send_native_file_transfer(
+        self,
+        file_path: str,
+        task_id: int = 1,
+        target_ip: Optional[str] = None,
+    ) -> None:
+        """Send an authentic X_SEND_FILE file transfer proposal."""
+        filename = os.path.basename(file_path)
+        size = os.path.getsize(file_path)
+        last_mod = int(os.path.getmtime(file_path))
+        self.pending_files[task_id] = {
+            "path": file_path,
+            "filename": filename,
+            "size": size,
+            "offset": 0,
+        }
+        env = build_x_send_file_envelope(
+            filename=filename,
+            size=size,
+            task_id=task_id,
+            file_id=task_id,
+            last_modify=last_mod,
+        )
+        self.send_native_envelope(env, target_ip)
+        logger.info("=" * 65)
+        logger.info("[FILE:9012] >>> SENT FILE TRANSFER PROPOSAL: %s (%dB, task_id=%d)", filename, size, task_id)
+        logger.info("=" * 65)
+
 
     def send_text_message(self, message: str, target_ip: Optional[str] = None) -> None:
         """Send a text message in accordance with operational mode."""
@@ -1012,7 +1282,27 @@ class LanBridgeTester:
                                 dec_xml = raw_dec.decode("gbk", errors="ignore")
 
                             if op == 0x03E8:
-                                logger.info("[RX:9012] Received Sandbox Profile (X_HANDSHARK)")
+                                logger.info("[RX:9012] Received Sandbox Profile (X_HANDSHARK): %s", dec_xml)
+                                import re
+                                m_f = re.search(r"<FILE_TRAN_TCP_PORT>(\d+)</FILE_TRAN_TCP_PORT>", dec_xml)
+                                if m_f:
+                                    self.peer_file_port = int(m_f.group(1))
+                                m_r = re.search(r"<FILE_TRAN_TCP_REVERSE_PORT>(\d+)</FILE_TRAN_TCP_REVERSE_PORT>", dec_xml)
+                                if m_r:
+                                    self.peer_reverse_port = int(m_r.group(1))
+                                logger.info("[PROFILE:NET] Peer ports: FILE=%s, REVERSE=%s", self.peer_file_port, self.peer_reverse_port)
+                                if self.peer_file_port and self.peer_file_port not in self.tcp_listeners:
+                                    try:
+                                        s_dyn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                                        s_dyn.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                                        s_dyn.setblocking(False)
+                                        s_dyn.bind((self.local_ip, self.peer_file_port))
+                                        s_dyn.listen(5)
+                                        self.tcp_listeners[self.peer_file_port] = s_dyn
+                                        logger.info("Bound dynamic TCP server on %s:%d to match peer FILE_TRAN_TCP_PORT", self.local_ip, self.peer_file_port)
+                                    except Exception as ex:
+                                        logger.warning("Could not bind dynamic TCP %d: %s", self.peer_file_port, ex)
+
                             elif op == 0x03EC:
                                 msg_id = extract_msg_id(dec_xml)
                                 # Send SendMsgAck (0x03ed) echoing peer's exact MSG_ID
@@ -1034,6 +1324,9 @@ class LanBridgeTester:
                                     # Auto-reply once per new message
                                     auto_reply = f"LanBridge Bot 收到: {msg_text}"
                                     self.send_native_chat_message(auto_reply, target_ip=src_ip)
+
+                            else:
+                                logger.info("[RX:9012-FRAG] Received Opcode 0x%04X (%d): %s", op, op, dec_xml)
 
                 elif c_type == 6:  # SEND_RELIABLE
                     d_len, = struct.unpack(">H", data[offset : offset + 2])
@@ -1065,6 +1358,16 @@ class LanBridgeTester:
                                 time.sleep(0.2)
                                 self.send_native_chat_message(self.initial_msg)
                                 self.initial_msg_sent = True
+
+                            if self.image_path and not self.image_sent:
+                                time.sleep(0.5)
+                                self.send_native_image_message(self.image_path, caption=self.image_caption)
+                                self.image_sent = True
+
+                            if self.file_to_send and not self.file_sent:
+                                time.sleep(0.5)
+                                self.send_native_file_transfer(self.file_to_send)
+                                self.file_sent = True
 
                         elif op == 0x03F8:  # X_HEARTBEAT
                             logger.debug("[RX:9012] Received peer X_HEARTBEAT")
@@ -1103,12 +1406,53 @@ class LanBridgeTester:
 
                         elif op == 0x03F3:  # X_OPERATE_RECV_FILE
                             logger.info("[FILE:9012] Peer performed file receive operation: %s", dec_xml)
+                            if "<OP>1</OP>" in dec_xml or "<OP>1 </OP>" in dec_xml:
+                                logger.info("*" * 65)
+                                logger.info("[FILE:ACCEPTED] REMOTE USER ACCEPTED FILE TRANSFER!")
+                                logger.info("*" * 65)
+                                for p in (self.peer_file_port, self.peer_reverse_port):
+                                    if p:
+                                        try:
+                                            c = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                                            c.setblocking(False)
+                                            err = c.connect_ex((self.sandbox_ip, p))
+                                            self.tcp_clients.append(c)
+                                            self.tcp_buffers[c] = bytearray()
+                                            logger.info("[TCP:FILE_RECV] Connecting to Sandbox %s:%d (code=%d)", self.sandbox_ip, p, err)
+                                        except Exception as ex:
+                                            logger.warning("[TCP:FILE_RECV] Connect error %s:%d: %s", self.sandbox_ip, p, ex)
 
                         elif op == 0x03F2:  # X_OPERATE_SEND_FILE
                             logger.info("[FILE:9012] Peer performed file send operation: %s", dec_xml)
 
                         elif op == 0x03F4:  # X_PROGRESS_RECV_FILE
                             logger.debug("[FILE:9012] Peer file progress sync: %s", dec_xml)
+
+                        elif op == 0x03FB:  # X_REVERSE_FILE_REQ
+                            logger.info("[FILE:9012] <<< RECEIVED X_REVERSE_FILE_REQ (Peer requests reverse transfer): %s", dec_xml)
+                            for p in (self.peer_reverse_port, self.peer_file_port):
+                                if p:
+                                    try:
+                                        c = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                                        c.setblocking(False)
+                                        err = c.connect_ex((self.sandbox_ip, p))
+                                        self.tcp_clients.append(c)
+                                        self.tcp_buffers[c] = bytearray()
+                                        logger.info("[TCP:OUTBOUND] Connecting to Sandbox reverse port %s:%d (code=%d)", self.sandbox_ip, p, err)
+                                    except Exception as ex:
+                                        logger.warning("[TCP:OUTBOUND] Connect error %s:%d: %s", self.sandbox_ip, p, ex)
+
+
+                        elif op == 0x03FE:  # X_OFFLINE_SEND_COMPLETED
+                            logger.info("[MSG:9012] Peer completed offline message flushing: %s", dec_xml)
+
+                        elif op == 0x03ED:  # X_SEND_MSG_ACK
+                            logger.debug("[MSG:9012] Received X_SEND_MSG_ACK receipt: %s", dec_xml)
+
+                        else:
+                            logger.info("[RX:9012] Received unknown Opcode 0x%04X (%d): %s", op, op, dec_xml)
+
+
 
                 elif c_type == 10:  # BANDWIDTH_LIMIT
                     offset += 8
@@ -1184,33 +1528,56 @@ class LanBridgeTester:
                         logger.debug("[TX:9012] Sent X_HEARTBEAT keepalive")
 
                 socks = [s for s in (self.sock_9011, self.sock_9012, self.sock_dyn, self.sock_2425) if s]
-                if self.sock_tcp9013:
-                    socks.append(self.sock_tcp9013)
+                socks.extend(self.tcp_listeners.values())
                 socks.extend(self.tcp_clients)
 
                 readable, _, _ = select.select(socks, [], [], 0.05)
                 for s in readable:
-                    if s == self.sock_tcp9013:
+                    if s in self.tcp_listeners.values():
+                        l_port = [p for p, sock in self.tcp_listeners.items() if sock == s][0]
                         try:
-                            conn, caddr = self.sock_tcp9013.accept()
+                            conn, caddr = s.accept()
                             conn.setblocking(False)
                             self.tcp_clients.append(conn)
                             self.tcp_buffers[conn] = bytearray()
-                            logger.info("[TCP:9013] Inbound connection established from %s", caddr)
+                            logger.info("[TCP:%d] Inbound connection established from %s", l_port, caddr)
                         except Exception as e:
-                            logger.warning("[TCP:9013] Accept error: %s", e)
+                            logger.warning("[TCP:%d] Accept error: %s", l_port, e)
                     elif s in self.tcp_clients:
+                        peer_desc = "unknown"
+                        try:
+                            peer_desc = str(s.getpeername())
+                        except Exception:
+                            pass
                         try:
                             chunk = s.recv(8192)
                             if not chunk:
-                                logger.info("[TCP:9013] Remote closed connection")
+                                logger.info("[TCP:%s] Remote closed connection", peer_desc)
                                 self.tcp_clients.remove(s)
                                 s.close()
                                 if s in self.tcp_buffers:
                                     del self.tcp_buffers[s]
                                 continue
                             self.tcp_buffers[s].extend(chunk)
-                            logger.info("[TCP:9013] Received %d bytes (Total buffer: %d bytes)", len(chunk), len(self.tcp_buffers[s]))
+                            logger.info("[TCP:%s] Full Chunk Hex (%d bytes):\n%s", peer_desc, len(chunk), chunk.hex())
+                            try:
+                                logger.info("[TCP:%s] Chunk ASCII: %s", peer_desc, chunk.decode("latin1", errors="replace"))
+                            except Exception:
+                                pass
+                            # Check for Mini-File protocol command 1 (Download Request)
+                            minifile_pkt = parse_minifile_packet(bytes(self.tcp_buffers[s]))
+                            if minifile_pkt and minifile_pkt.get("cmd") == 1 and "md5" in minifile_pkt:
+                                req_md5 = minifile_pkt["md5"].lower()
+                                logger.info("=" * 65)
+                                logger.info("[TCP:MINIFILE] <<< RECEIVED DOWNLOAD REQUEST (CMD 1) FOR MD5: %s", req_md5)
+                                logger.info("=" * 65)
+                                req_len = minifile_pkt["total_len"]
+                                del self.tcp_buffers[s][:req_len]
+                                if self.send_minifile_stream(s, req_md5):
+                                    logger.info("[TCP:MINIFILE] Image stream completed for MD5 %s", req_md5)
+                                else:
+                                    logger.warning("[TCP:MINIFILE] Failed to stream image for MD5 %s", req_md5)
+
                             saved_img = check_and_save_image(bytes(self.tcp_buffers[s]))
                             if saved_img:
                                 logger.info("*" * 65)
@@ -1251,11 +1618,14 @@ class LanBridgeTester:
 def main() -> None:
     """CLI entrypoint."""
     parser = argparse.ArgumentParser(description="LanBridge Active Network Verification Tester (M4)")
-    parser.add_argument("--sandbox-ip", default="172.31.122.7", help="Sandbox target IP address (default: 172.31.122.7)")
+    parser.add_argument("--sandbox-ip", default="172.31.121.133", help="Sandbox target IP address (default: 172.31.121.133)")
     parser.add_argument("--mode", choices=["native", "ipmsg"], default="native", help="Operational mode (default: native)")
     parser.add_argument("--nick", default=DEFAULT_NICKNAME, help="Display nickname (default: LanBridge-Bot)")
     parser.add_argument("--group", default=DEFAULT_GROUP, help="Display contact group (default: 内网通联系人)")
     parser.add_argument("--msg", default=None, help="Optional text message to send on startup")
+    parser.add_argument("--image", default=None, help="Optional image file path to send on connection")
+    parser.add_argument("--caption", default="", help="Optional text caption for the sent image")
+    parser.add_argument("--file", default=None, help="Optional file path to send via P2P file transfer")
     parser.add_argument("--greeting", action="store_true", help="Send default Chinese greeting on connection")
     parser.add_argument("--duration", type=float, default=None, help="Run duration in seconds (default: unlimited)")
     parser.add_argument("--bcast-ip", default="172.31.127.255", help="Subnet broadcast IP (default: 172.31.127.255)")
@@ -1271,9 +1641,13 @@ def main() -> None:
         nick=args.nick,
         group=args.group,
         initial_msg=initial_msg,
+        image_path=args.image,
+        image_caption=args.caption,
+        file_to_send=args.file,
         mode=args.mode,
     )
     tester.run(duration_seconds=args.duration)
+
 
 
 if __name__ == "__main__":
