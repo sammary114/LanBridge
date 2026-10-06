@@ -118,6 +118,36 @@ class TestWebGateway(AioHTTPTestCase):
         self.assertEqual(msg.get("event"), "pong")
         await ws.close()
 
+    @unittest_run_loop
+    async def test_native_status_and_import(self):
+        """Test GET /api/native/status and POST /api/native/import."""
+        resp = await self.client.get("/api/native/status")
+        self.assertEqual(resp.status, 200)
+        data = await resp.json()
+        self.assertTrue(data["ok"])
+
+        resp_import = await self.client.post("/api/native/import", json={"sync_groups": True})
+        self.assertEqual(resp_import.status, 200)
+        import_data = await resp_import.json()
+        self.assertTrue(import_data["ok"])
+
+    @unittest_run_loop
+    async def test_image_endpoint(self):
+        """Test GET /api/images/{md5}."""
+        dummy_md5 = "11223344556677889900aabbccddeeff"
+        # Prepopulate dummy image
+        self.client_node.pending_images[dummy_md5] = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+
+        resp = await self.client.get(f"/api/images/{dummy_md5}")
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(resp.content_type, "image/png")
+        body = await resp.read()
+        self.assertEqual(body, b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+
+        # Not found test
+        resp_404 = await self.client.get("/api/images/00000000000000000000000000000000")
+        self.assertEqual(resp_404.status, 404)
+
 
 if __name__ == "__main__":
     import unittest

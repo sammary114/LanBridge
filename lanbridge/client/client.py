@@ -22,6 +22,7 @@ import time
 import uuid
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
+from lanbridge.adapter import NativeNwtAdapter
 from lanbridge.discovery import (
     SubnetScanner,
     get_active_network_interfaces,
@@ -174,6 +175,13 @@ class LanBridgeClient:
         self.local_shared_files: Dict[str, GroupSharedFile] = {}  # md5 -> GroupSharedFile
         self.status: int = 0
         self.signature: str = ""
+        self.native_adapter: Optional[NativeNwtAdapter] = None
+        if NativeNwtAdapter.is_installed():
+            self.native_adapter = NativeNwtAdapter()
+            try:
+                self._native_subnets = self.native_adapter.read_network_config().get("subnets", [])
+            except Exception:
+                pass
 
         # Event callbacks
         self._on_message_handlers: List[Callable[[ChatMessage], None]] = []
@@ -886,6 +894,11 @@ class LanBridgeClient:
                     elif not req_md5 and len(self.pending_images) == 1:
                         req_md5 = next(iter(self.pending_images.keys()))
 
+                    if req_md5 and req_md5 not in self.pending_images and self.native_adapter:
+                        cached = self.native_adapter.get_picture_by_md5(req_md5)
+                        if cached:
+                            self.pending_images[req_md5] = cached
+
                     if req_md5 and req_md5 in self.pending_images:
                         img_data = self.pending_images[req_md5]
                         file_size = len(img_data)
@@ -1423,6 +1436,10 @@ class LanBridgeClient:
                 except Exception as e:
                     logger.debug("Failed computing /24 for interface %s: %s", iface.name, e)
 
+            for s in self._native_subnets:
+                if s not in targets:
+                    targets.append(s)
+
             if targets:
                 logger.info("Initiating auto subnet scan across: %s", targets)
                 scanner = SubnetScanner(
@@ -1504,6 +1521,11 @@ class LanBridgeClient:
         """Send an inline image to a target IP, managing token and CFolderTranEngine server."""
         img_md5 = hashlib.md5(image_data).hexdigest().lower()
         self.pending_images[img_md5] = image_data
+        if self.native_adapter:
+            try:
+                self.native_adapter.save_picture(img_md5, image_data)
+            except Exception as e:
+                logger.debug("Failed saving image to native cache: %s", e)
         token = random.randint(10000, 30000)
         self.pending_tokens[token] = img_md5
 
@@ -1773,6 +1795,95 @@ class LanBridgeClient:
                     self._udp_9012_transport.sendto(frag, (dest, self.main_port))
                 except Exception:
                     pass
+
+
+    def import_from_native(
+        self,
+        nwt_dir: Optional[str] = None,
+        sync_subnets: bool = True,
+        sync_groups: bool = True,
+        sync_shares: bool = True,
+        apply_identity: bool = False,
+    ) -> dict:
+        """Import configuration, groups, and shares from native Nwt installation.
+
+        Args:
+            nwt_dir: Optional custom path to Nwt data directory.
+            sync_subnets: Whether to add native configured subnets to scanner targets.
+            sync_groups: Whether to import native QGroup discussion groups and members.
+            sync_shares: Whether to import native shared files.
+            apply_identity: Whether to adopt native account UID, nickname, and signature.
+
+        Returns:
+            A summary dictionary detailing the imported assets.
+        """
+        adapter = NativeNwtAdapter(nwt_dir) if nwt_dir else (self.native_adapter or NativeNwtAdapter())
+        self.native_adapter = adapter
+
+        summary = {
+            "installed": adapter.is_installed(adapter.nwt_dir),
+            "nwt_dir": adapter.nwt_dir,
+            "account": None,
+            "user_name": None,
+            "signature": None,
+            "subnets": [],
+            "groups_imported": 0,
+            "shares_imported": 0,
+        }
+
+        if not summary["installed"]:
+            return summary
+
+        # 1. Identity & preferences
+        account_uid = adapter.read_account()
+        user_opts = adapter.read_user_options()
+        summary["account"] = account_uid
+        summary["user_name"] = user_opts.get("user_name")
+        summary["signature"] = user_opts.get("signature")
+
+        if apply_identity:
+            if account_uid:
+                self.user_id = account_uid
+            if user_opts.get("user_name"):
+                self.nickname = user_opts["user_name"]
+            if user_opts.get("signature"):
+                self.signature = user_opts["signature"]
+
+        # 2. Subnets
+        if sync_subnets:
+            net_cfg = adapter.read_network_config()
+            new_subnets = net_cfg.get("subnets", [])
+            summary["subnets"] = new_subnets
+            for s in new_subnets:
+                if s not in self._native_subnets:
+                    self._native_subnets.append(s)
+
+        # 3. Discussion Groups
+        if sync_groups:
+            qgs = adapter.read_qgroups()
+            summary["groups_imported"] = len(qgs)
+            for gid, qg in qgs.items():
+                if gid not in self.qgroups:
+                    self.qgroups[gid] = qg
+                else:
+                    self.qgroups[gid].members.update(qg.members)
+
+        # 4. Shares
+        if sync_shares:
+            shares = adapter.read_shared_files()
+            summary["shares_imported"] = len(shares)
+            for sid, gsf in shares.items():
+                self.local_shared_files[sid] = gsf
+                self.group_shared_files.setdefault(gsf.qgroup_id, {})[sid] = gsf
+
+        logger.info(
+            "Imported native Nwt data: %d groups, %d shares, %d subnets (identity=%s)",
+            summary["groups_imported"],
+            summary["shares_imported"],
+            len(summary["subnets"]),
+            "applied" if apply_identity else "preserved",
+        )
+        return summary
 
 
     async def stop(self) -> None:

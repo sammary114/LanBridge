@@ -34,6 +34,9 @@ async def main_async() -> None:
     parser.add_argument("--nickname", default="LanBridge-Bot", help="Local nickname")
     parser.add_argument("--user-id", default=None, help="Local user ID (hex MD5)")
     parser.add_argument("--broadcast", default=None, help="Subnet broadcast IP (e.g. 192.168.1.255)")
+    parser.add_argument("--import-native", action="store_true", help="Auto import config, groups, and shares from native Nwt installation")
+    parser.add_argument("--native-dir", default=None, help="Path to native Nwt directory (default: C:\\Users\\Public\\Nwt)")
+    parser.add_argument("--adopt-identity", action="store_true", help="Adopt native account UID, nickname, and signature")
     parser.add_argument("--no-web", action="store_true", help="Run in headless daemon mode without web gateway")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose debug logging")
 
@@ -50,6 +53,21 @@ async def main_async() -> None:
         client_kwargs["broadcast_ip"] = args.broadcast
 
     client = LanBridgeClient(**client_kwargs)
+
+    if args.import_native or args.native_dir or args.adopt_identity:
+        res = client.import_from_native(
+            nwt_dir=args.native_dir,
+            apply_identity=args.adopt_identity,
+        )
+        if res.get("installed"):
+            logging.info(
+                "Imported from native Nwt (%s): %d groups, %d shares, %d subnets",
+                res.get("nwt_dir"),
+                res.get("groups_imported"),
+                res.get("shares_imported"),
+                len(res.get("subnets", [])),
+            )
+
     await client.start()
 
     runner = None

@@ -26,6 +26,7 @@ import os
 from typing import Set
 from aiohttp import web, WSMsgType
 
+from lanbridge.adapter import NativeNwtAdapter
 from lanbridge.client import LanBridgeClient
 from lanbridge.models import (
     ChatMessage,
@@ -56,6 +57,9 @@ class WebGateway:
         self.app.router.add_get("/api/contacts", self.handle_get_contacts)
         self.app.router.add_get("/api/groups", self.handle_get_groups)
         self.app.router.add_get("/api/shared_files", self.handle_get_shared_files)
+        self.app.router.add_get("/api/native/status", self.handle_get_native_status)
+        self.app.router.add_post("/api/native/import", self.handle_post_native_import)
+        self.app.router.add_get("/api/images/{md5}", self.handle_get_image)
         self.app.router.add_post("/api/message", self.handle_post_message)
         self.app.router.add_post("/api/group_message", self.handle_post_group_message)
         self.app.router.add_post("/api/group/create", self.handle_post_create_group)
@@ -330,6 +334,76 @@ class WebGateway:
                         "is_cached": f.is_cached,
                     })
         return web.json_response({"ok": True, "files": files_list})
+
+    async def handle_get_native_status(self, request: web.Request) -> web.Response:
+        adapter = self.client.native_adapter
+        if not adapter and NativeNwtAdapter.is_installed():
+            adapter = NativeNwtAdapter()
+            self.client.native_adapter = adapter
+
+        installed = adapter.is_installed() if adapter else False
+        nwt_dir = adapter.nwt_dir if adapter else None
+        account = adapter.read_account() if adapter else None
+        opts = adapter.read_user_options() if adapter else {}
+        user_name = opts.get("user_name")
+        signature = opts.get("signature")
+        subnets = adapter.read_network_config().get("subnets", []) if adapter else []
+
+        return web.json_response({
+            "ok": True,
+            "installed": installed,
+            "nwt_dir": nwt_dir,
+            "account": account,
+            "user_name": user_name,
+            "signature": signature,
+            "subnets": subnets,
+        })
+
+    async def handle_post_native_import(self, request: web.Request) -> web.Response:
+        data = {}
+        if request.can_read_body:
+            try:
+                data = await request.json()
+            except Exception:
+                data = {}
+        nwt_dir = data.get("nwt_dir")
+        sync_subnets = data.get("sync_subnets", True)
+        sync_groups = data.get("sync_groups", True)
+        sync_shares = data.get("sync_shares", True)
+        apply_identity = data.get("apply_identity", False)
+
+        result = self.client.import_from_native(
+            nwt_dir=nwt_dir,
+            sync_subnets=sync_subnets,
+            sync_groups=sync_groups,
+            sync_shares=sync_shares,
+            apply_identity=apply_identity,
+        )
+        return web.json_response({"ok": True, "result": result})
+
+    async def handle_get_image(self, request: web.Request) -> web.Response:
+        md5_hash = request.match_info.get("md5", "").lower()
+        if not md5_hash:
+            return web.Response(status=400, text="Missing md5")
+
+        data = self.client.pending_images.get(md5_hash)
+        if not data and self.client.native_adapter:
+            data = self.client.native_adapter.get_picture_by_md5(md5_hash)
+            if data:
+                self.client.pending_images[md5_hash] = data
+
+        if not data:
+            return web.Response(status=404, text="Image not found")
+
+        content_type = "image/jpeg"
+        if data.startswith(b"\x89PNG"):
+            content_type = "image/png"
+        elif data.startswith(b"GIF"):
+            content_type = "image/gif"
+        elif data.startswith(b"BM"):
+            content_type = "image/bmp"
+
+        return web.Response(body=data, content_type=content_type)
 
     async def handle_post_message(self, request: web.Request) -> web.Response:
         data = await request.json()

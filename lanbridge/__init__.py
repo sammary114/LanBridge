@@ -4,6 +4,7 @@ from __future__ import annotations
 
 __version__ = "0.5.0"
 
+from lanbridge.adapter import NativeNwtAdapter
 from lanbridge.client import LanBridgeClient
 from lanbridge.discovery import SubnetScanner
 from lanbridge.models import (
@@ -48,6 +49,7 @@ from lanbridge.protocol import (
 
 __all__ = [
     "__version__",
+    "NativeNwtAdapter",
     "LanBridgeClient",
     "SubnetScanner",
     "Contact",
