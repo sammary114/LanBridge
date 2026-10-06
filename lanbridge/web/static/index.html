@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LanBridge - 内网通原生协议终端</title>
+    <style>
+        :root {
+            --bg-primary: #121824;
+            --bg-secondary: #1a2234;
+            --bg-tertiary: #242f49;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+            --border-color: #334155;
+            --bubble-self: #2563eb;
+            --bubble-peer: #1e293b;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-primary);
+            color: var(--text-main);
+            height: 100vh;
+            display: flex;
+            overflow: hidden;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 340px;
+            background-color: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .user-profile {
+            padding: 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-bottom: 1px solid var(--border-color);
+            background: linear-gradient(135deg, rgba(37,99,235,0.1), transparent);
+        }
+
+        .avatar {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 18px;
+            color: #fff;
+            position: relative;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: var(--accent-green);
+            border: 2px solid var(--bg-secondary);
+            position: absolute;
+            bottom: -1px;
+            right: -1px;
+        }
+
+        .user-info {
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .user-name {
+            font-weight: 600;
+            font-size: 15px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .user-meta {
+            font-size: 12px;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border-color);
+            background-color: rgba(0,0,0,0.1);
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 12px 6px;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+
+        .tab-btn.active {
+            color: var(--accent);
+            border-bottom: 2px solid var(--accent);
+            background-color: rgba(59, 130, 246, 0.05);
+        }
+
+        .list-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+        }
+
+        .list-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.15s;
+            margin-bottom: 4px;
+        }
+
+        .list-item:hover {
+            background-color: var(--bg-tertiary);
+        }
+
+        .list-item.active {
+            background-color: rgba(59, 130, 246, 0.2);
+            border-left: 3px solid var(--accent);
+        }
+
+        .item-avatar {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            background: #334155;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 14px;
+            color: #cbd5e1;
+        }
+
+        .item-details {
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .item-title {
+            font-size: 14px;
+            font-weight: 500;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .item-sub {
+            font-size: 12px;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-top: 2px;
+        }
+
+        /* Main Chat Area */
+        .chat-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background-color: var(--bg-primary);
+            position: relative;
+        }
+
+        .chat-header {
+            padding: 14px 20px;
+            background-color: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .chat-title {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .chat-subtitle {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn-action {
+            background-color: var(--bg-tertiary);
+            color: var(--text-main);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-action:hover {
+            background-color: var(--accent);
+            border-color: var(--accent);
+        }
+
+        .messages-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .message {
+            display: flex;
+            flex-direction: column;
+            max-width: 65%;
+            position: relative;
+        }
+
+        .message.self {
+            align-self: flex-end;
+            align-items: flex-end;
+        }
+
+        .message.peer {
+            align-self: flex-start;
+            align-items: flex-start;
+        }
+
+        .bubble {
+            padding: 10px 14px;
+            border-radius: 12px;
+            font-size: 14px;
+            line-height: 1.5;
+            word-break: break-word;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .message.self .bubble {
+            background-color: var(--bubble-self);
+            color: #fff;
+            border-bottom-right-radius: 2px;
+        }
+
+        .message.peer .bubble {
+            background-color: var(--bubble-peer);
+            color: var(--text-main);
+            border-bottom-left-radius: 2px;
+            border: 1px solid var(--border-color);
+        }
+
+        .msg-meta {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 4px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .recall-btn {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 11px;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+
+        .recall-btn:hover {
+            color: var(--accent-red);
+        }
+
+        .recalled-notice {
+            font-style: italic;
+            color: var(--text-muted);
+            font-size: 12px;
+            padding: 4px 10px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 6px;
+        }
+
+        .typing-banner {
+            font-size: 12px;
+            color: var(--accent);
+            padding: 4px 20px;
+            min-height: 24px;
+            font-style: italic;
+        }
+
+        .input-bar {
+            padding: 16px 20px;
+            background-color: var(--bg-secondary);
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .input-tools {
+            display: flex;
+            gap: 8px;
+        }
+
+        .tool-btn {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        .tool-btn:hover {
+            background-color: var(--bg-tertiary);
+            color: var(--text-main);
+        }
+
+        .input-row {
+            display: flex;
+            gap: 12px;
+        }
+
+        .chat-input {
+            flex: 1;
+            background-color: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: var(--text-main);
+            font-size: 14px;
+            outline: none;
+            resize: none;
+            height: 48px;
+        }
+
+        .chat-input:focus {
+            border-color: var(--accent);
+        }
+
+        .send-btn {
+            background-color: var(--accent);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 0 20px;
+            font-weight: 500;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .send-btn:hover {
+            background-color: var(--accent-hover);
+        }
+
+        /* Modal Dialog */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(4px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+
+        .modal-card {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 24px;
+            width: 420px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .modal-title {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .form-group label {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .form-input {
+            background-color: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: var(--text-main);
+            font-size: 14px;
+            outline: none;
+        }
+
+        .form-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="user-profile">
+            <div class="avatar" id="myAvatar">
+                LB
+                <div class="status-dot"></div>
+            </div>
+            <div class="user-info">
+                <div class="user-name" id="myNickname">LanBridge Client</div>
+                <div class="user-meta" id="myIp">127.0.0.1 (Loading...)</div>
+            </div>
+        </div>
+
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('contacts')">联系人</button>
+            <button class="tab-btn" onclick="switchTab('groups')">讨论组</button>
+            <button class="tab-btn" onclick="switchTab('files')">群共享</button>
+        </div>
+
+        <div class="list-container" id="listContainer">
+            <!-- Dynamic list items -->
+        </div>
+    </div>
+
+    <div class="chat-area">
+        <div class="chat-header">
+            <div>
+                <div class="chat-title" id="chatTitle">选择联系人或讨论组</div>
+                <div class="chat-subtitle" id="chatSubtitle">已就绪</div>
+            </div>
+            <div class="header-actions">
+                <button class="btn-action" onclick="openCreateGroupModal()">新建讨论组</button>
+            </div>
+        </div>
+
+        <div class="messages-container" id="messagesContainer">
+            <!-- Messages stream -->
+        </div>
+
+        <div class="typing-banner" id="typingBanner"></div>
+
+        <div class="input-bar">
+            <div class="input-tools">
+                <button class="tool-btn" onclick="sendShake()">抖动窗口</button>
+                <button class="tool-btn" onclick="triggerFileShare()">共享文件</button>
+            </div>
+            <div class="input-row">
+                <textarea class="chat-input" id="chatInput" placeholder="输入消息 (Enter 发送, Shift+Enter 换行)..."></textarea>
+                <button class="send-btn" onclick="sendMessage()">发送</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Group Modal -->
+    <div class="modal-overlay" id="createGroupModal">
+        <div class="modal-card">
+            <div class="modal-title">创建新讨论组</div>
+            <div class="form-group">
+                <label>讨论组名称</label>
+                <input class="form-input" id="newGroupName" placeholder="例如：架构研发攻坚组">
+            </div>
+            <div class="form-group">
+                <label>群公告</label>
+                <input class="form-input" id="newGroupAnn" placeholder="输入讨论组公告">
+            </div>
+            <div class="form-actions">
+                <button class="btn-action" onclick="closeCreateGroupModal()">取消</button>
+                <button class="send-btn" onclick="submitCreateGroup()">创建</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentTab = 'contacts';
+        let currentChat = null; // { type: 'peer' | 'group', id: string, name: string, ip?: string }
+        let contacts = [];
+        let groups = [];
+        let sharedFiles = [];
+        let messages = []; // Array of message objects
+        let typingTimeout = null;
+        let ws = null;
+
+        async function init() {
+            await fetchStatus();
+            await fetchContacts();
+            await fetchGroups();
+            setupWebSocket();
+            setupInputDebounce();
+        }
+
+        async function fetchStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                if (data.ok) {
+                    document.getElementById('myNickname').textContent = data.nickname;
+                    document.getElementById('myIp').textContent = `${data.local_ip}:${data.main_port} [${data.status === 0 ? '在线' : '离开'}]`;
+                    document.getElementById('myAvatar').firstChild.textContent = data.nickname.slice(0, 2);
+                }
+            } catch (e) {
+                console.error("Failed fetching status", e);
+            }
+        }
+
+        async function fetchContacts() {
+            try {
+                const res = await fetch('/api/contacts');
+                const data = await res.json();
+                if (data.ok) {
+                    contacts = data.contacts;
+                    if (currentTab === 'contacts') renderList();
+                }
+            } catch (e) {
+                console.error("Failed fetching contacts", e);
+            }
+        }
+
+        async function fetchGroups() {
+            try {
+                const res = await fetch('/api/groups');
+                const data = await res.json();
+                if (data.ok) {
+                    groups = data.groups;
+                    if (currentTab === 'groups') renderList();
+                }
+            } catch (e) {
+                console.error("Failed fetching groups", e);
+            }
+        }
+
+        async function fetchFiles() {
+            try {
+                const res = await fetch('/api/shared_files');
+                const data = await res.json();
+                if (data.ok) {
+                    sharedFiles = data.files;
+                    if (currentTab === 'files') renderList();
+                }
+            } catch (e) {
+                console.error("Failed fetching files", e);
+            }
+        }
+
+        function switchTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('.tab-btn').forEach((btn, idx) => {
+                btn.classList.toggle('active', (tab === 'contacts' && idx === 0) || (tab === 'groups' && idx === 1) || (tab === 'files' && idx === 2));
+            });
+            if (tab === 'files') fetchFiles();
+            renderList();
+        }
+
+        function renderList() {
+            const container = document.getElementById('listContainer');
+            container.innerHTML = '';
+
+            if (currentTab === 'contacts') {
+                contacts.forEach(c => {
+                    const item = document.createElement('div');
+                    item.className = `list-item ${currentChat && currentChat.id === c.user_id ? 'active' : ''}`;
+                    item.onclick = () => selectChat({ type: 'peer', id: c.user_id, name: c.nickname || c.user_id, ip: c.ip });
+                    item.innerHTML = `
+                        <div class="item-avatar">${(c.nickname || 'U').slice(0, 2)}</div>
+                        <div class="item-details">
+                            <div class="item-title">
+                                <span>${escapeHtml(c.nickname || c.user_id)}</span>
+                                <span style="font-size:11px;color:${c.status === 0 ? '#10b981' : '#94a3b8'}">● 在线</span>
+                            </div>
+                            <div class="item-sub">${c.ip}:${c.port} (${c.group_name || '联系人'})</div>
+                        </div>
+                    `;
+                    container.appendChild(item);
+                });
+            } else if (currentTab === 'groups') {
+                groups.forEach(g => {
+                    const item = document.createElement('div');
+                    item.className = `list-item ${currentChat && currentChat.id === g.qgroup_id ? 'active' : ''}`;
+                    item.onclick = () => selectChat({ type: 'group', id: g.qgroup_id, name: g.name });
+                    item.innerHTML = `
+                        <div class="item-avatar" style="background:#4338ca;">群</div>
+                        <div class="item-details">
+                            <div class="item-title">
+                                <span>${escapeHtml(g.name)}</span>
+                                <span style="font-size:11px;color:#94a3b8">${Object.keys(g.members || {}).length} 人</span>
+                            </div>
+                            <div class="item-sub">${escapeHtml(g.announcement || g.intro || '暂无公告')}</div>
+                        </div>
+                    `;
+                    container.appendChild(item);
+                });
+            } else if (currentTab === 'files') {
+                sharedFiles.forEach(f => {
+                    const item = document.createElement('div');
+                    item.className = 'list-item';
+                    const sizeMb = (f.filesize / (1024 * 1024)).toFixed(2);
+                    item.innerHTML = `
+                        <div class="item-avatar" style="background:#059669;">文</div>
+                        <div class="item-details">
+                            <div class="item-title">
+                                <span>${escapeHtml(f.filename)}</span>
+                                <span style="font-size:11px;color:#94a3b8">${sizeMb} MB</span>
+                            </div>
+                            <div class="item-sub">来自 ${escapeHtml(f.uploader_name)} (${f.uploader_ip})</div>
+                        </div>
+                    `;
+                    container.appendChild(item);
+                });
+            }
+        }
+
+        function selectChat(chat) {
+            currentChat = chat;
+            document.getElementById('chatTitle').textContent = chat.name;
+            document.getElementById('chatSubtitle').textContent = chat.type === 'peer' ? `IP: ${chat.ip}` : `讨论组 ID: ${chat.id}`;
+            renderMessages();
+            renderList();
+        }
+
+        function renderMessages() {
+            const container = document.getElementById('messagesContainer');
+            container.innerHTML = '';
+            if (!currentChat) return;
+
+            const relevant = messages.filter(m => {
+                if (currentChat.type === 'peer') {
+                    return m.type === 'peer' && (m.sender_id === currentChat.id || m.recipient_id === currentChat.id);
+                } else {
+                    return m.type === 'group' && m.qgroup_id === currentChat.id;
+                }
+            });
+
+            relevant.forEach(m => {
+                const isSelf = m.is_self;
+                const msgEl = document.createElement('div');
+                msgEl.className = `message ${isSelf ? 'self' : 'peer'}`;
+
+                if (m.recalled) {
+                    msgEl.innerHTML = `<div class="recalled-notice">${isSelf ? '你' : '对方'} 撤回了一条消息</div>`;
+                } else {
+                    const timeStr = new Date(m.timestamp * 1000).toLocaleTimeString();
+                    msgEl.innerHTML = `
+                        <div class="bubble">${escapeHtml(m.text)}</div>
+                        <div class="msg-meta">
+                            <span>${timeStr}</span>
+                            ${isSelf ? `<button class="recall-btn" onclick="recallMessage(${m.msg_id}, '${m.uuid || ''}')">撤回</button>` : ''}
+                        </div>
+                    `;
+                }
+                container.appendChild(msgEl);
+            });
+            container.scrollTop = container.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('chatInput');
+            const text = input.value.trim();
+            if (!text || !currentChat) return;
+
+            input.value = '';
+            const msgId = Date.now();
+            const selfMsg = {
+                msg_id: msgId,
+                type: currentChat.type,
+                sender_id: 'me',
+                recipient_id: currentChat.id,
+                qgroup_id: currentChat.id,
+                text: text,
+                timestamp: Date.now() / 1000,
+                is_self: true,
+                uuid: 'msg_' + msgId,
+            };
+            messages.push(selfMsg);
+            renderMessages();
+
+            try {
+                if (currentChat.type === 'peer') {
+                    await fetch('/api/message', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ target_ip: currentChat.ip, text: text })
+                    });
+                } else {
+                    await fetch('/api/group_message', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ qgroup_id: currentChat.id, text: text })
+                    });
+                }
+            } catch (e) {
+                console.error("Failed sending message", e);
+            }
+        }
+
+        async function recallMessage(msgId, uuid) {
+            if (!currentChat) return;
+            try {
+                await fetch('/api/recall', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        target_ip: currentChat.ip || '',
+                        target_msg_id: msgId,
+                        target_uuid: uuid,
+                        qgroup_id: currentChat.type === 'group' ? currentChat.id : null,
+                    })
+                });
+                const m = messages.find(x => x.msg_id === msgId);
+                if (m) {
+                    m.recalled = true;
+                    renderMessages();
+                }
+            } catch (e) {
+                console.error("Failed recalling message", e);
+            }
+        }
+
+        function setupWebSocket() {
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+            ws.onmessage = (e) => {
+                try {
+                    const event = JSON.parse(e.data);
+                    handleWsEvent(event);
+                } catch (err) {
+                    console.error("Invalid WS message", err);
+                }
+            };
+
+            ws.onclose = () => {
+                setTimeout(setupWebSocket, 3000);
+            };
+        }
+
+        function handleWsEvent(evt) {
+            if (evt.event === 'message') {
+                messages.push({
+                    msg_id: evt.data.msg_id,
+                    type: 'peer',
+                    sender_id: evt.data.sender_id,
+                    recipient_id: evt.data.recipient_id,
+                    text: evt.data.text,
+                    timestamp: evt.data.timestamp,
+                    is_self: false,
+                });
+                renderMessages();
+            } else if (evt.event === 'group_message') {
+                messages.push({
+                    msg_id: evt.data.msg_id,
+                    type: 'group',
+                    sender_id: evt.data.sender_id,
+                    qgroup_id: evt.data.qgroup_id,
+                    text: evt.data.text,
+                    timestamp: evt.data.timestamp,
+                    is_self: false,
+                });
+                renderMessages();
+            } else if (evt.event === 'contact_online') {
+                fetchContacts();
+            } else if (evt.event === 'typing') {
+                const banner = document.getElementById('typingBanner');
+                if (currentChat && currentChat.ip === evt.data.peer_ip && evt.data.is_typing) {
+                    banner.textContent = '对方正在输入中...';
+                    clearTimeout(typingTimeout);
+                    typingTimeout = setTimeout(() => { banner.textContent = ''; }, 3000);
+                } else {
+                    banner.textContent = '';
+                }
+            } else if (evt.event === 'recall') {
+                const m = messages.find(x => x.msg_id === evt.data.target_msg_id || x.uuid === evt.data.target_uuid);
+                if (m) {
+                    m.recalled = true;
+                    renderMessages();
+                }
+            } else if (evt.event === 'group_invite' || evt.event === 'group_member_change' || evt.event === 'group_dismiss') {
+                fetchGroups();
+            } else if (evt.event === 'group_file_shared') {
+                fetchFiles();
+            }
+        }
+
+        function setupInputDebounce() {
+            const input = document.getElementById('chatInput');
+            let isTyping = false;
+            let stopTypingTimer = null;
+
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                    return;
+                }
+                if (currentChat && currentChat.type === 'peer' && currentChat.ip) {
+                    if (!isTyping) {
+                        isTyping = true;
+                        fetch('/api/typing', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ peer_ip: currentChat.ip, typing: true })
+                        });
+                    }
+                    clearTimeout(stopTypingTimer);
+                    stopTypingTimer = setTimeout(() => {
+                        isTyping = false;
+                        fetch('/api/typing', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ peer_ip: currentChat.ip, typing: false })
+                        });
+                    }, 2000);
+                }
+            });
+        }
+
+        function openCreateGroupModal() {
+            document.getElementById('createGroupModal').style.display = 'flex';
+        }
+
+        function closeCreateGroupModal() {
+            document.getElementById('createGroupModal').style.display = 'none';
+        }
+
+        async function submitCreateGroup() {
+            const name = document.getElementById('newGroupName').value.trim();
+            const ann = document.getElementById('newGroupAnn').value.trim();
+            if (!name) return;
+
+            try {
+                const res = await fetch('/api/group/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: name, announcement: ann })
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    closeCreateGroupModal();
+                    await fetchGroups();
+                    switchTab('groups');
+                    selectChat({ type: 'group', id: data.qgroup_id, name: name });
+                }
+            } catch (e) {
+                console.error("Failed creating group", e);
+            }
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>

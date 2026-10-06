@@ -19,6 +19,7 @@ import random
 import socket
 import struct
 import time
+import uuid
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 from lanbridge.discovery import (
@@ -27,7 +28,15 @@ from lanbridge.discovery import (
     get_default_broadcast_addresses,
     get_primary_local_ip,
 )
-from lanbridge.models import ChatMessage, Contact, FileTask, GroupSharedFile
+from lanbridge.models import (
+    ChatMessage,
+    Contact,
+    FileTask,
+    GroupSharedFile,
+    QGroup,
+    RecallNotice,
+    TypingNotice,
+)
 from lanbridge.protocol import (
     DEFAULT_GROUP,
     DEFAULT_GUID,
@@ -51,17 +60,31 @@ from lanbridge.protocol import (
     build_opcode_84,
     build_opcode_88_fragments,
     build_opcode_8a,
+    build_x_change_sign_envelope,
+    build_x_change_status_envelope,
     build_x_flash_screen_envelope,
     build_x_heartbeat_envelope,
     build_x_qgroup_delete_share_envelope,
+    build_x_qgroup_dismiss_envelope,
+    build_x_qgroup_exit_envelope,
+    build_x_qgroup_invite_envelope,
+    build_x_qgroup_invite_rsp_envelope,
+    build_x_qgroup_kick_envelope,
+    build_x_qgroup_other_invite_envelope,
+    build_x_qgroup_push_info_envelope,
+    build_x_qgroup_push_user_envelope,
     build_x_qgroup_req_info_envelope,
     build_x_qgroup_req_info_rsp_envelope,
+    build_x_qgroup_req_user_envelope,
+    build_x_qgroup_req_user_rsp_envelope,
     build_x_qgroup_send_msg_envelope,
     build_x_qgroup_share_file_envelope,
     build_x_ready_envelope,
+    build_x_recall_msg_envelope,
     build_x_send_image_envelope,
     build_x_send_msg_ack_envelope,
     build_x_send_msg_envelope,
+    build_x_send_writting_envelope,
     build_x_share_check_pwd_rsp_envelope,
     build_x_share_download_file_envelope,
     build_x_share_download_file_rsp_envelope,
@@ -70,9 +93,11 @@ from lanbridge.protocol import (
     extract_chat_message,
     extract_msg_id,
     extract_qgroup_id,
+    extract_recall_info,
     parse_discovery_packet,
     parse_folder_tran_packet,
     parse_minifile_packet,
+    parse_qgroup_xml,
     parse_share_xml,
 )
 
@@ -144,8 +169,11 @@ class LanBridgeClient:
         self.contacts: Dict[str, Contact] = {}
         self.pending_images: Dict[str, bytes] = {}  # md5 -> bytes
         self.pending_tokens: Dict[int, str] = {}    # token -> md5
+        self.qgroups: Dict[str, QGroup] = {}         # qgroup_id -> QGroup
         self.group_shared_files: Dict[str, Dict[str, GroupSharedFile]] = {}  # qgroup_id -> {md5: GroupSharedFile}
         self.local_shared_files: Dict[str, GroupSharedFile] = {}  # md5 -> GroupSharedFile
+        self.status: int = 0
+        self.signature: str = ""
 
         # Event callbacks
         self._on_message_handlers: List[Callable[[ChatMessage], None]] = []
@@ -153,6 +181,11 @@ class LanBridgeClient:
         self._on_contact_online_handlers: List[Callable[[Contact], None]] = []
         self._on_contact_offline_handlers: List[Callable[[Contact], None]] = []
         self._on_group_file_shared_handlers: List[Callable[[GroupSharedFile], None]] = []
+        self._on_qgroup_invite_handlers: List[Callable[[QGroup], None]] = []
+        self._on_qgroup_member_change_handlers: List[Callable[[QGroup], None]] = []
+        self._on_qgroup_dismiss_handlers: List[Callable[[str], None]] = []
+        self._on_typing_handlers: List[Callable[[TypingNotice], None]] = []
+        self._on_message_recall_handlers: List[Callable[[RecallNotice], None]] = []
 
         self._running = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -187,12 +220,72 @@ class LanBridgeClient:
         self._on_group_file_shared_handlers.append(handler)
         return handler
 
+    def on_qgroup_invite(self, handler: Callable[[QGroup], None]) -> Callable[[QGroup], None]:
+        """Register a callback when invited to a discussion group / QGroup."""
+        self._on_qgroup_invite_handlers.append(handler)
+        return handler
+
+    def on_qgroup_member_change(self, handler: Callable[[QGroup], None]) -> Callable[[QGroup], None]:
+        """Register a callback when a QGroup's members or profile change."""
+        self._on_qgroup_member_change_handlers.append(handler)
+        return handler
+
+    def on_qgroup_dismiss(self, handler: Callable[[str], None]) -> Callable[[str], None]:
+        """Register a callback when a QGroup is dismissed or user kicked."""
+        self._on_qgroup_dismiss_handlers.append(handler)
+        return handler
+
+    def on_typing(self, handler: Callable[[TypingNotice], None]) -> Callable[[TypingNotice], None]:
+        """Register a callback when a contact is typing."""
+        self._on_typing_handlers.append(handler)
+        return handler
+
+    def on_message_recall(self, handler: Callable[[RecallNotice], None]) -> Callable[[RecallNotice], None]:
+        """Register a callback when a message is recalled."""
+        self._on_message_recall_handlers.append(handler)
+        return handler
+
     def emit_group_file_shared(self, shared_file: GroupSharedFile) -> None:
         for handler in self._on_group_file_shared_handlers:
             try:
                 handler(shared_file)
             except Exception as e:
                 logger.error("Error in on_group_file_shared handler: %s", e)
+
+    def emit_qgroup_invite(self, qg: QGroup) -> None:
+        for handler in self._on_qgroup_invite_handlers:
+            try:
+                handler(qg)
+            except Exception as e:
+                logger.error("Error in on_qgroup_invite handler: %s", e)
+
+    def emit_qgroup_member_change(self, qg: QGroup) -> None:
+        for handler in self._on_qgroup_member_change_handlers:
+            try:
+                handler(qg)
+            except Exception as e:
+                logger.error("Error in on_qgroup_member_change handler: %s", e)
+
+    def emit_qgroup_dismiss(self, qgroup_id: str) -> None:
+        for handler in self._on_qgroup_dismiss_handlers:
+            try:
+                handler(qgroup_id)
+            except Exception as e:
+                logger.error("Error in on_qgroup_dismiss handler: %s", e)
+
+    def emit_typing(self, tn: TypingNotice) -> None:
+        for handler in self._on_typing_handlers:
+            try:
+                handler(tn)
+            except Exception as e:
+                logger.error("Error in on_typing handler: %s", e)
+
+    def emit_message_recall(self, rn: RecallNotice) -> None:
+        for handler in self._on_message_recall_handlers:
+            try:
+                handler(rn)
+            except Exception as e:
+                logger.error("Error in on_message_recall handler: %s", e)
 
 
     def get_session(self, peer_ip: str) -> ENetProtocolSession:
@@ -375,23 +468,38 @@ class LanBridgeClient:
         replies: List[bytes],
     ) -> None:
         """Handle decrypted XML/JSON payloads."""
-        xml_str = plaintext.decode("gbk", errors="replace")
+        try:
+            xml_str = plaintext.decode("utf-8")
+        except UnicodeDecodeError:
+            xml_str = plaintext.decode("gbk", errors="replace")
         logger.debug("Received envelope Opcode=0x%04X: %s", opcode, xml_str[:120])
 
         # Opcode 1004 (0x03EC): X_SEND_MSG
-        if opcode == 0x03EC:
+        if opcode == 0x03EC or ("<X_SEND_MSG " in xml_str or "<X_SEND_MSG>" in xml_str):
             msg_id = extract_msg_id(xml_str)
             ack_env = build_x_send_msg_ack_envelope(msg_id)
             frags = build_opcode_88_fragments(ack_env)
             replies.extend(frags)
 
-            text = extract_chat_message(xml_str)
             sender_uid = "unknown"
             for uid, c in self.contacts.items():
                 if c.ip == peer_ip:
                     sender_uid = uid
                     break
 
+            # Check for message recall
+            recall_info = extract_recall_info(xml_str)
+            if recall_info:
+                rn = RecallNotice(
+                    sender_id=sender_uid,
+                    target_uuid=recall_info["target_uuid"],
+                    target_msg_id=recall_info["target_msg_id"],
+                    timestamp=time.time(),
+                )
+                self.emit_message_recall(rn)
+                return
+
+            text = extract_chat_message(xml_str)
             # Check for inline image
             import re
             img_match = re.search(r'(\d+)\|([0-9a-fA-F]{32})', xml_str)
@@ -417,14 +525,48 @@ class LanBridgeClient:
             self.emit_message(msg_obj)
 
         # Opcode 1000 (0x03E8): X_HANDSHARK
-        elif opcode == 0x03E8:
+        elif opcode == 0x03E8 or "<X_HANDSHARK" in xml_str:
             ready_env = build_x_ready_envelope(self.user_id)
             replies.extend(build_opcode_88_fragments(ready_env))
 
+        # Opcode 1008 (0x03F0): X_SEND_WRITTING (Typing State)
+        elif opcode == Opcode.X_SEND_WRITTING or "<X_SEND_WRITTING" in xml_str:
+            parsed = parse_qgroup_xml(xml_str)
+            param = parsed.get("param", "1")
+            is_typing = (param == "1")
+            sender_uid = "unknown"
+            for uid, c in self.contacts.items():
+                if c.ip == peer_ip:
+                    sender_uid = uid
+                    break
+            tn = TypingNotice(
+                sender_id=sender_uid,
+                peer_ip=peer_ip,
+                is_typing=is_typing,
+                timestamp=time.time(),
+            )
+            self.emit_typing(tn)
+
+        # Opcode 1001 (0x03E9): X_CHANGE_STATUS
+        elif opcode == Opcode.X_CHANGE_STATUS or "<X_CHANGE_STATUS" in xml_str:
+            parsed = parse_qgroup_xml(xml_str)
+            st = int(parsed.get("status", "0"))
+            for c in self.contacts.values():
+                if c.ip == peer_ip:
+                    c.status = st
+                    break
+
+        # Opcode 1002 (0x03EA): X_CHANGE_SIGN
+        elif opcode == Opcode.X_CHANGE_SIGN or "<X_CHANGE_SIGN" in xml_str:
+            parsed = parse_qgroup_xml(xml_str)
+            sign = parsed.get("sign", "")
+            for c in self.contacts.values():
+                if c.ip == peer_ip:
+                    c.group_name = sign or c.group_name
+                    break
+
         # Opcode 3011 (0x0BC3): X_QGROUP_SEND_MSG (Group Chat Message)
         elif opcode == Opcode.X_QGROUP_SEND_MSG or "<X_QGROUP_SEND_MSG" in xml_str:
-            msg_id = extract_msg_id(xml_str)
-            text = extract_chat_message(xml_str)
             qgroup_id = extract_qgroup_id(xml_str) or "0"
             sender_uid = "unknown"
             for uid, c in self.contacts.items():
@@ -432,6 +574,21 @@ class LanBridgeClient:
                     sender_uid = uid
                     break
 
+            # Check for group message recall
+            recall_info = extract_recall_info(xml_str)
+            if recall_info:
+                rn = RecallNotice(
+                    sender_id=sender_uid,
+                    target_uuid=recall_info["target_uuid"],
+                    target_msg_id=recall_info["target_msg_id"],
+                    timestamp=time.time(),
+                    qgroup_id=qgroup_id,
+                )
+                self.emit_message_recall(rn)
+                return
+
+            msg_id = extract_msg_id(xml_str)
+            text = extract_chat_message(xml_str)
             import re
             img_match = re.search(r'(\d+)\|([0-9a-fA-F]{32})', xml_str)
             is_image = False
@@ -456,11 +613,122 @@ class LanBridgeClient:
             )
             self.emit_group_message(msg_obj)
 
+        # Opcode 3001 (0x0BB9): X_QGROUP_INVITE_RSP
+        elif opcode == Opcode.X_QGROUP_INVITE_RSP or "<X_QGROUP_INVITE_RSP" in xml_str:
+            info = parse_qgroup_xml(xml_str)
+            qgroup_id = info.get("qgroup_id", "")
+            user_name = info.get("user_name", "")
+            action = int(info.get("action", "1"))
+            sender_uid = "unknown"
+            for uid, c in self.contacts.items():
+                if c.ip == peer_ip:
+                    sender_uid = uid
+                    break
+            if action == 1 and qgroup_id in self.qgroups:
+                self.qgroups[qgroup_id].members[sender_uid] = user_name or sender_uid
+                self.emit_qgroup_member_change(self.qgroups[qgroup_id])
+
+        # Opcode 3000 (0x0BB8): X_QGROUP_INVITE
+        elif opcode == Opcode.X_QGROUP_INVITE or ("<X_QGROUP_INVITE " in xml_str or "<X_QGROUP_INVITE>" in xml_str):
+            info = parse_qgroup_xml(xml_str)
+            qgroup_id = info.get("qgroup_id", "")
+            if qgroup_id:
+                sender_uid = "unknown"
+                for uid, c in self.contacts.items():
+                    if c.ip == peer_ip:
+                        sender_uid = uid
+                        break
+                qg = self.qgroups.setdefault(qgroup_id, QGroup(qgroup_id=qgroup_id))
+                qg.name = info.get("qgroup_name", qg.name)
+                qg.master_id = info.get("qgroup_master", qg.master_id)
+                qg.intro = info.get("qgroup_intr", qg.intro)
+                qg.announcement = info.get("qgroup_ann", qg.announcement)
+                if "qgroup_info_ver" in info:
+                    try:
+                        qg.version = int(info["qgroup_info_ver"])
+                    except ValueError:
+                        pass
+                if sender_uid and sender_uid != "unknown":
+                    qg.members[sender_uid] = sender_uid
+                qg.members[self.user_id] = self.nickname
+                self.emit_qgroup_invite(qg)
+
+        # Opcode 3002 (0x0BBA): X_QGROUP_PUSH_INFO
+        elif opcode == Opcode.X_QGROUP_PUSH_INFO or "<X_QGROUP_PUSH_INFO" in xml_str:
+            info = parse_qgroup_xml(xml_str)
+            qgroup_id = info.get("qgroup_id", "")
+            if qgroup_id in self.qgroups:
+                qg = self.qgroups[qgroup_id]
+                if "qgroup_name" in info:
+                    qg.name = info["qgroup_name"]
+                if "qgroup_ann" in info:
+                    qg.announcement = info["qgroup_ann"]
+                if "qgroup_intr" in info:
+                    qg.intro = info["qgroup_intr"]
+                if "qgroup_info_ver" in info:
+                    try:
+                        qg.version = int(info["qgroup_info_ver"])
+                    except ValueError:
+                        pass
+                self.emit_qgroup_member_change(qg)
+
+        # Opcode 3003 (0x0BBB): X_QGROUP_PUSH_USER
+        elif opcode == Opcode.X_QGROUP_PUSH_USER or "<X_QGROUP_PUSH_USER" in xml_str:
+            info = parse_qgroup_xml(xml_str)
+            qgroup_id = info.get("qgroup_id", "")
+            if qgroup_id in self.qgroups:
+                self.emit_qgroup_member_change(self.qgroups[qgroup_id])
+
         # Opcode 3005 (0x0BBD): X_QGROUP_REQ_INFO
-        elif opcode == Opcode.X_QGROUP_REQ_INFO or "<X_QGROUP_REQ_INFO" in xml_str:
+        elif opcode == Opcode.X_QGROUP_REQ_INFO or ("<X_QGROUP_REQ_INFO " in xml_str or "<X_QGROUP_REQ_INFO>" in xml_str):
             qgroup_id = extract_qgroup_id(xml_str) or "0"
             rsp_env = build_x_qgroup_req_info_rsp_envelope(qgroup_id=qgroup_id, ret=0)
             replies.extend(build_opcode_88_fragments(rsp_env))
+
+        # Opcode 3006 (0x0BBE): X_QGROUP_REQ_USER
+        elif opcode == Opcode.X_QGROUP_REQ_USER or ("<X_QGROUP_REQ_USER " in xml_str or "<X_QGROUP_REQ_USER>" in xml_str):
+            info = parse_qgroup_xml(xml_str)
+            qgroup_id = info.get("qgroup_id", "")
+            rsp_env = build_x_qgroup_req_user_rsp_envelope(qgroup_id=qgroup_id, name=self.nickname, ret=0)
+            replies.extend(build_opcode_88_fragments(rsp_env))
+
+        # Opcode 3008 (0x0BC0): X_QGROUP_DISMISS
+        elif opcode == Opcode.X_QGROUP_DISMISS or "<X_QGROUP_DISMISS" in xml_str:
+            info = parse_qgroup_xml(xml_str)
+            qgroup_id = info.get("qgroup_id", "")
+            if qgroup_id:
+                self.qgroups.pop(qgroup_id, None)
+                self.emit_qgroup_dismiss(qgroup_id)
+
+        # Opcode 3009 (0x0BC1): X_QGROUP_EXIT
+        elif opcode == Opcode.X_QGROUP_EXIT or "<X_QGROUP_EXIT" in xml_str:
+            info = parse_qgroup_xml(xml_str)
+            qgroup_id = info.get("qgroup_id", "")
+            sender_uid = "unknown"
+            for uid, c in self.contacts.items():
+                if c.ip == peer_ip:
+                    sender_uid = uid
+                    break
+            if qgroup_id in self.qgroups:
+                self.qgroups[qgroup_id].members.pop(sender_uid, None)
+                self.emit_qgroup_member_change(self.qgroups[qgroup_id])
+
+        # Opcode 3010 (0x0BC2): X_QGROUP_KICK
+        elif opcode == Opcode.X_QGROUP_KICK or "<X_QGROUP_KICK" in xml_str:
+            info = parse_qgroup_xml(xml_str)
+            qgroup_id = info.get("qgroup_id", "")
+            if qgroup_id in self.qgroups:
+                self.qgroups.pop(qgroup_id, None)
+                self.emit_qgroup_dismiss(qgroup_id)
+
+        # Opcode 3012 (0x0BC4): X_QGROUP_OTHER_INVITE
+        elif opcode == Opcode.X_QGROUP_OTHER_INVITE or "<X_QGROUP_OTHER_INVITE" in xml_str:
+            info = parse_qgroup_xml(xml_str)
+            qgroup_id = info.get("qgroup_id", "")
+            user_id = info.get("id", "")
+            if qgroup_id in self.qgroups and user_id:
+                self.qgroups[qgroup_id].members[user_id] = user_id
+                self.emit_qgroup_member_change(self.qgroups[qgroup_id])
 
         # Group File Share Announcement (X_QGROUP_SHARE_FILE)
         elif opcode == ShareOpcode.X_QGROUP_SHARE_FILE or "<X_QGROUP_SHARE_FILE" in xml_str:
@@ -1255,6 +1523,257 @@ class LanBridgeClient:
             for frag in frags:
                 self._udp_9012_transport.sendto(frag, (target_ip, self.main_port))
             logger.info("Sent window shake to %s", target_ip)
+
+    def create_qgroup(
+        self,
+        name: str,
+        intro: str = "",
+        announcement: str = "",
+        member_ids: Optional[List[str]] = None,
+    ) -> QGroup:
+        """Create a new local QGroup discussion group."""
+        qgroup_id = uuid.uuid4().hex
+        qg = QGroup(
+            qgroup_id=qgroup_id,
+            name=name,
+            master_id=self.user_id,
+            intro=intro,
+            announcement=announcement,
+            members={self.user_id: self.nickname},
+            created_time=time.time(),
+        )
+        self.qgroups[qgroup_id] = qg
+        return qg
+
+    async def invite_to_qgroup(
+        self,
+        qgroup_id: str,
+        member_ids: List[str],
+    ) -> None:
+        """Send X_QGROUP_INVITE to specified member IDs."""
+        qg = self.qgroups.get(qgroup_id)
+        if not qg:
+            raise KeyError(f"Group {qgroup_id} not found")
+
+        env = build_x_qgroup_invite_envelope(
+            qgroup_id=qgroup_id,
+            name=qg.name,
+            master_id=qg.master_id or self.user_id,
+            intro=qg.intro,
+            announcement=qg.announcement,
+            version=qg.version,
+        )
+        frags = build_opcode_88_fragments(env)
+
+        if not self._udp_9012_transport:
+            return
+
+        for mid in member_ids:
+            contact = self.contacts.get(mid)
+            if contact and contact.ip:
+                for frag in frags:
+                    try:
+                        self._udp_9012_transport.sendto(frag, (contact.ip, self.main_port))
+                    except Exception as e:
+                        logger.debug("Failed sending group invite to %s: %s", contact.ip, e)
+
+    async def respond_qgroup_invite(
+        self,
+        qgroup_id: str,
+        target_ip: str,
+        accept: bool = True,
+    ) -> None:
+        """Send X_QGROUP_INVITE_RSP accepting or rejecting an invitation."""
+        env = build_x_qgroup_invite_rsp_envelope(
+            qgroup_id=qgroup_id,
+            user_name=self.nickname,
+            action=1 if accept else 0,
+        )
+        frags = build_opcode_88_fragments(env)
+        if self._udp_9012_transport:
+            for frag in frags:
+                self._udp_9012_transport.sendto(frag, (target_ip, self.main_port))
+
+    async def update_qgroup_info(
+        self,
+        qgroup_id: str,
+        name: Optional[str] = None,
+        announcement: Optional[str] = None,
+        intro: Optional[str] = None,
+    ) -> None:
+        """Update group metadata and broadcast X_QGROUP_PUSH_INFO to members."""
+        qg = self.qgroups.get(qgroup_id)
+        if not qg:
+            raise KeyError(f"Group {qgroup_id} not found")
+        if name is not None:
+            qg.name = name
+        if announcement is not None:
+            qg.announcement = announcement
+        if intro is not None:
+            qg.intro = intro
+        qg.version += 1
+
+        env = build_x_qgroup_push_info_envelope(
+            qgroup_id=qgroup_id,
+            name=qg.name,
+            master_id=qg.master_id,
+            intro=qg.intro,
+            announcement=qg.announcement,
+            version=qg.version,
+        )
+        frags = build_opcode_88_fragments(env)
+        if not self._udp_9012_transport:
+            return
+
+        destinations = set()
+        for mid in qg.members:
+            if mid in self.contacts and self.contacts[mid].ip:
+                destinations.add(self.contacts[mid].ip)
+        for b_ip in self.broadcast_ips:
+            destinations.add(b_ip)
+
+        for dest in destinations:
+            for frag in frags:
+                try:
+                    self._udp_9012_transport.sendto(frag, (dest, self.main_port))
+                except Exception as e:
+                    logger.debug("Failed sending qgroup info push to %s: %s", dest, e)
+
+    async def kick_qgroup_member(
+        self,
+        qgroup_id: str,
+        member_id: str,
+    ) -> None:
+        """Kick a member from a group via X_QGROUP_KICK."""
+        qg = self.qgroups.get(qgroup_id)
+        if not qg:
+            raise KeyError(f"Group {qgroup_id} not found")
+        qg.members.pop(member_id, None)
+
+        env = build_x_qgroup_kick_envelope(qgroup_id=qgroup_id)
+        frags = build_opcode_88_fragments(env)
+        contact = self.contacts.get(member_id)
+        if contact and contact.ip and self._udp_9012_transport:
+            for frag in frags:
+                self._udp_9012_transport.sendto(frag, (contact.ip, self.main_port))
+
+    async def exit_qgroup(self, qgroup_id: str) -> None:
+        """Leave a group via X_QGROUP_EXIT."""
+        qg = self.qgroups.pop(qgroup_id, None)
+        env = build_x_qgroup_exit_envelope(qgroup_id=qgroup_id)
+        frags = build_opcode_88_fragments(env)
+        if not self._udp_9012_transport:
+            return
+        destinations = set()
+        if qg:
+            for mid in qg.members:
+                if mid in self.contacts and self.contacts[mid].ip:
+                    destinations.add(self.contacts[mid].ip)
+        for b_ip in self.broadcast_ips:
+            destinations.add(b_ip)
+        for dest in destinations:
+            for frag in frags:
+                try:
+                    self._udp_9012_transport.sendto(frag, (dest, self.main_port))
+                except Exception:
+                    pass
+
+    async def dismiss_qgroup(self, qgroup_id: str) -> None:
+        """Dismiss/disband a group via X_QGROUP_DISMISS."""
+        qg = self.qgroups.pop(qgroup_id, None)
+        env = build_x_qgroup_dismiss_envelope(qgroup_id=qgroup_id)
+        frags = build_opcode_88_fragments(env)
+        if not self._udp_9012_transport:
+            return
+        destinations = set()
+        if qg:
+            for mid in qg.members:
+                if mid in self.contacts and self.contacts[mid].ip:
+                    destinations.add(self.contacts[mid].ip)
+        for b_ip in self.broadcast_ips:
+            destinations.add(b_ip)
+        for dest in destinations:
+            for frag in frags:
+                try:
+                    self._udp_9012_transport.sendto(frag, (dest, self.main_port))
+                except Exception:
+                    pass
+
+    async def send_typing_state(self, peer_ip: str, typing: bool = True) -> None:
+        """Send typing status notice (X_SEND_WRITTING) to peer IP."""
+        env = build_x_send_writting_envelope(typing=typing)
+        frags = build_opcode_88_fragments(env)
+        if self._udp_9012_transport:
+            for frag in frags:
+                self._udp_9012_transport.sendto(frag, (peer_ip, self.main_port))
+
+    async def recall_message(
+        self,
+        target_ip: str,
+        target_msg_id: int,
+        target_uuid: str = "",
+        qgroup_id: Optional[str] = None,
+    ) -> None:
+        """Send message recall notice to peer IP or group."""
+        env = build_x_recall_msg_envelope(
+            target_msg_id=target_msg_id,
+            target_uuid=target_uuid,
+            qgroup_id=qgroup_id,
+        )
+        frags = build_opcode_88_fragments(env)
+        if not self._udp_9012_transport:
+            return
+        if qgroup_id and not target_ip:
+            destinations = set()
+            for c in self.contacts.values():
+                if c.ip:
+                    destinations.add(c.ip)
+            for b_ip in self.broadcast_ips:
+                destinations.add(b_ip)
+            for dest in destinations:
+                for frag in frags:
+                    try:
+                        self._udp_9012_transport.sendto(frag, (dest, self.main_port))
+                    except Exception:
+                        pass
+        else:
+            for frag in frags:
+                self._udp_9012_transport.sendto(frag, (target_ip, self.main_port))
+
+    async def set_status(self, status: int) -> None:
+        """Change online status and broadcast to contacts."""
+        self.status = status
+        env = build_x_change_status_envelope(status=status)
+        frags = build_opcode_88_fragments(env)
+        if not self._udp_9012_transport:
+            return
+        destinations = set(c.ip for c in self.contacts.values() if c.ip)
+        for b_ip in self.broadcast_ips:
+            destinations.add(b_ip)
+        for dest in destinations:
+            for frag in frags:
+                try:
+                    self._udp_9012_transport.sendto(frag, (dest, self.main_port))
+                except Exception:
+                    pass
+
+    async def set_signature(self, signature: str) -> None:
+        """Change personal signature and broadcast to contacts."""
+        self.signature = signature
+        env = build_x_change_sign_envelope(signature=signature)
+        frags = build_opcode_88_fragments(env)
+        if not self._udp_9012_transport:
+            return
+        destinations = set(c.ip for c in self.contacts.values() if c.ip)
+        for b_ip in self.broadcast_ips:
+            destinations.add(b_ip)
+        for dest in destinations:
+            for frag in frags:
+                try:
+                    self._udp_9012_transport.sendto(frag, (dest, self.main_port))
+                except Exception:
+                    pass
+
 
     async def stop(self) -> None:
         """Shut down the client and release network resources."""

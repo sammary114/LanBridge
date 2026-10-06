@@ -22,6 +22,14 @@ class Contact:
     last_seen: float = 0.0
 
     @property
+    def group_name(self) -> str:
+        return self.group
+
+    @group_name.setter
+    def group_name(self, value: str) -> None:
+        self.group = value
+
+    @property
     def is_online(self) -> bool:
         return self.status != 3
 
@@ -84,4 +92,40 @@ class GroupSharedFile:
         now = current_time if current_time is not None else time.time()
         ref_time = self.last_accessed if self.last_accessed > 0 else self.created_time
         return (now - ref_time) > ttl_seconds
+
+
+@dataclass
+class QGroup:
+    """Represents a LAN discussion group / QGroup."""
+
+    qgroup_id: str
+    name: str = "未命名讨论组"
+    master_id: str = ""
+    announcement: str = ""
+    intro: str = ""
+    members: dict[str, str] = field(default_factory=dict)  # user_id -> nickname
+    version: int = 1
+    created_time: float = 0.0
+
+
+@dataclass
+class TypingNotice:
+    """Represents a peer typing status notice."""
+
+    sender_id: str
+    peer_ip: str
+    is_typing: bool = True
+    timestamp: float = 0.0
+
+
+@dataclass
+class RecallNotice:
+    """Represents a message recall notice."""
+
+    sender_id: str
+    target_uuid: str
+    target_msg_id: int
+    timestamp: float = 0.0
+    qgroup_id: Optional[str] = None
+
 

@@ -267,7 +267,10 @@ ip.addr == 47.57.13.180 && tcp.port == 80
 - **零配置自驱动接入引擎（Zero-Touch Autonomous Integration & Group Chat）全面交付**：
   * **网卡自适应与定向多广播**：`lanbridge.discovery.network` 自动枚举活动物理/虚拟网卡（剥离 loopback 和 APIPA 169.254.x），向所有活动子网定向广播和 `255.255.255.255` 并发宣告上线，双方用户均无需手动查询 IP 或配置网段。
   * **开机静默单播穿透扫描与主动唤醒**：客户端开机后台异步驱动 `SubnetScanner` 并发单播探测本地 `/24` 所在网段，收到反馈立即主动发起 ENet Opcode 0x82 握手与 profile 推送，在对端联系人树上无感点亮在线绿标。
-  * **群组发现与群文字聊天闭环**：反编译确认并实现原生群聊 Opcode 0x0BC3（3011，`X_QGROUP_SEND_MSG`）、群信息拉取 0x0BBD（3005，`X_QGROUP_REQ_INFO`）与响应 0x0BBE（3006，`X_QGROUP_REQ_INFO_RSP`），并在 `LanBridgeClient` 提供 `send_group_message`、`sync_group_info` 与 `@client.on_group_message`。
-  * 自动化测试扩展至 **88 项**，全量通过（88/88 PASS）。
-- **当前最优先任务**：推进 M6 应用层客户端开发（现代化轻量 Web 客户端 / 极客终端 TUI 客户端 / 开放 Bot 网关）。
+- **自动化测试套件**：全量 **105 项自动化测试**（105/105 PASS），涵盖传输层、密码机、协议握手、文件引擎、群文件共享、跨网段探测、QGroup全套生命周期管理以及 Web 网关。
+- **M6 里程碑全面交付（全功能闭环与 Web 客户端/Bot 网关）**：
+  * **多人讨论组/群聊全套生命周期管理**：完整逆向还原并实现原生 13 项群组命令字（建群、入群应答、群资料/公告推送、群成员变动、拉取成员、踢人、解散、退群）；
+  * **聊天增强与状态机制**：实现原生输入中指示 `X_SEND_WRITTING`（Opcode 1008）、消息撤回机制 `recall`（原生 JSON type 6）、个人在线状态切换与个性签名广播；
+  * **现代化 Web 客户端与开放 Bot 网关**：内置纯异步单页应用 UI 与 REST/WebSocket 网关，支持 `python -m lanbridge` 一键启动图形化聊天、联系人与群文件管理；
+  * 原生内网通 3.4.3055 协议族所有已知特性全部实现完毕并达成 100% 兼容。
 

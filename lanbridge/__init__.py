@@ -6,7 +6,15 @@ __version__ = "0.5.0"
 
 from lanbridge.client import LanBridgeClient
 from lanbridge.discovery import SubnetScanner
-from lanbridge.models import ChatMessage, Contact, FileTask, GroupSharedFile
+from lanbridge.models import (
+    ChatMessage,
+    Contact,
+    FileTask,
+    GroupSharedFile,
+    QGroup,
+    RecallNotice,
+    TypingNotice,
+)
 from lanbridge.protocol import (
     AesEngine,
     BlowfishEngine,
@@ -46,6 +54,9 @@ __all__ = [
     "ChatMessage",
     "FileTask",
     "GroupSharedFile",
+    "QGroup",
+    "TypingNotice",
+    "RecallNotice",
     "XteaEngine",
     "BlowfishEngine",
     "AesEngine",

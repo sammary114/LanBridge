@@ -33,20 +33,46 @@ DEFAULT_GROUP = "内网通联系人"
 
 
 class Opcode:
+    # Basic / 1-on-1 Messages (1000 ~ 1025)
     X_HANDSHARK = 0x03E8           # 1000
+    X_CHANGE_STATUS = 0x03E9       # 1001
+    X_CHANGE_SIGN = 0x03EA         # 1002
+    X_CHANGE_INFO = 0x03EB         # 1003
     X_SEND_MSG = 0x03EC            # 1004
     X_SEND_MSG_ACK = 0x03ED        # 1005
+    X_SEND_RECEIPT = 0x03EE        # 1006
     X_SEND_FLASH_SCREEN = 0x03EF   # 1007
-    X_INPUT_STATE = 0x03F0         # 1008
+    X_SEND_WRITTING = 0x03F0       # 1008
+    X_INPUT_STATE = 0x03F0         # 1008 (Alias)
     X_SEND_FILE = 0x03F1           # 1009
     X_OPERATE_SEND_FILE = 0x03F2   # 1010
     X_OPERATE_RECV_FILE = 0x03F3   # 1011
     X_PROGRESS_RECV_FILE = 0x03F4  # 1012
+    X_SEND_FOLDER = 0x03F5         # 1013
+    X_OPERATE_SEND_FOLDER = 0x03F6 # 1014
+    X_OPERATE_RECV_FOLDER = 0x03F7 # 1015
     X_HEARTBEAT = 0x03F8           # 1016
+    X_QUIT = 0x03F9                # 1017
     X_READY = 0x03FA               # 1018
+    X_REVERSE_FILE_REQ = 0x03FB    # 1019
+    X_REVERSE_FOLDER_REQ = 0x03FC  # 1020
+    X_SHARE_SUBNET = 0x03FD        # 1021
+
+    # QGroup Discussion / Group (3000 ~ 3012)
+    X_QGROUP_INVITE = 0x0BB8       # 3000
+    X_QGROUP_INVITE_RSP = 0x0BB9   # 3001
+    X_QGROUP_PUSH_INFO = 0x0BBA    # 3002
+    X_QGROUP_PUSH_USER = 0x0BBB    # 3003
+    X_QGROUP_REQ_INFO_SYS = 0x0BBC # 3004
     X_QGROUP_REQ_INFO = 0x0BBD     # 3005
     X_QGROUP_REQ_INFO_RSP = 0x0BBE # 3006
+    X_QGROUP_REQ_USER = 0x0BBE     # 3006 (Alias)
+    X_QGROUP_REQ_USER_RSP = 0x0BBF # 3007
+    X_QGROUP_DISMISS = 0x0BC0      # 3008
+    X_QGROUP_EXIT = 0x0BC1         # 3009
+    X_QGROUP_KICK = 0x0BC2         # 3010
     X_QGROUP_SEND_MSG = 0x0BC3     # 3011
+    X_QGROUP_OTHER_INVITE = 0x0BC4 # 3012
 
 
 def build_native_profile(
@@ -447,4 +473,270 @@ def extract_qgroup_id(dec_xml: str) -> Optional[str]:
     except Exception:
         pass
     return None
+
+
+def build_x_qgroup_invite_envelope(
+    qgroup_id: str,
+    name: str,
+    master_id: str,
+    intro: str = "",
+    announcement: str = "",
+    version: int = 1,
+) -> bytes:
+    """Build authentic encrypted X_QGROUP_INVITE (Opcode 3000 / 0x0BB8) envelope."""
+    xml = (
+        f'<X_QGROUP_INVITE docver="1">'
+        f'<INFO>'
+        f'<QGROUP_ID>{qgroup_id}</QGROUP_ID>'
+        f'<QGROUP_NAME>{name}</QGROUP_NAME>'
+        f'<QGROUP_MASTER>{master_id}</QGROUP_MASTER>'
+        f'<QGROUP_INTR>{intro}</QGROUP_INTR>'
+        f'<QGROUP_ANN>{announcement}</QGROUP_ANN>'
+        f'<QGROUP_INFO_VER>{version}</QGROUP_INFO_VER>'
+        f'</INFO>'
+        f'</X_QGROUP_INVITE>'
+    )
+    return _xtea.build_envelope(Opcode.X_QGROUP_INVITE, xml, encoding="utf-8")
+
+
+def build_x_qgroup_invite_rsp_envelope(
+    qgroup_id: str,
+    user_name: str,
+    action: int = 1,
+) -> bytes:
+    """Build authentic encrypted X_QGROUP_INVITE_RSP (Opcode 3001 / 0x0BB9) envelope."""
+    xml = (
+        f'<X_QGROUP_INVITE_RSP docver="1">'
+        f'<QGROUP_ID>{qgroup_id}</QGROUP_ID>'
+        f'<USER_NAME>{user_name}</USER_NAME>'
+        f'<ACTION>{action}</ACTION>'
+        f'</X_QGROUP_INVITE_RSP>'
+    )
+    return _xtea.build_envelope(Opcode.X_QGROUP_INVITE_RSP, xml, encoding="utf-8")
+
+
+def build_x_qgroup_push_info_envelope(
+    qgroup_id: str,
+    name: str,
+    master_id: str,
+    intro: str = "",
+    announcement: str = "",
+    version: int = 1,
+) -> bytes:
+    """Build authentic encrypted X_QGROUP_PUSH_INFO (Opcode 3002 / 0x0BBA) envelope."""
+    xml = (
+        f'<X_QGROUP_PUSH_INFO docver="1">'
+        f'<INFO>'
+        f'<QGROUP_ID>{qgroup_id}</QGROUP_ID>'
+        f'<QGROUP_NAME>{name}</QGROUP_NAME>'
+        f'<QGROUP_MASTER>{master_id}</QGROUP_MASTER>'
+        f'<QGROUP_INTR>{intro}</QGROUP_INTR>'
+        f'<QGROUP_ANN>{announcement}</QGROUP_ANN>'
+        f'<QGROUP_INFO_VER>{version}</QGROUP_INFO_VER>'
+        f'</INFO>'
+        f'</X_QGROUP_PUSH_INFO>'
+    )
+    return _xtea.build_envelope(Opcode.X_QGROUP_PUSH_INFO, xml, encoding="utf-8")
+
+
+def build_x_qgroup_push_user_envelope(
+    qgroup_id: str,
+    name: str,
+    master_id: str,
+    intro: str = "",
+    announcement: str = "",
+) -> bytes:
+    """Build authentic encrypted X_QGROUP_PUSH_USER (Opcode 3003 / 0x0BBB) envelope."""
+    xml = (
+        f'<X_QGROUP_PUSH_USER docver="1">'
+        f'<INFO>'
+        f'<QGROUP_ID>{qgroup_id}</QGROUP_ID>'
+        f'<QGROUP_NAME>{name}</QGROUP_NAME>'
+        f'<QGROUP_MASTER>{master_id}</QGROUP_MASTER>'
+        f'<QGROUP_INTR>{intro}</QGROUP_INTR>'
+        f'<QGROUP_ANN>{announcement}</QGROUP_ANN>'
+        f'</INFO>'
+        f'</X_QGROUP_PUSH_USER>'
+    )
+    return _xtea.build_envelope(Opcode.X_QGROUP_PUSH_USER, xml, encoding="utf-8")
+
+
+def build_x_qgroup_req_user_envelope(qgroup_id: str) -> bytes:
+    """Build authentic encrypted X_QGROUP_REQ_USER (Opcode 3006 / 0x0BBE) envelope."""
+    xml = f'<X_QGROUP_REQ_USER docver="1"><QGROUP_ID>{qgroup_id}</QGROUP_ID></X_QGROUP_REQ_USER>'
+    return _xtea.build_envelope(Opcode.X_QGROUP_REQ_USER, xml, encoding="utf-8")
+
+
+def build_x_qgroup_req_user_rsp_envelope(qgroup_id: str, name: str = "", ret: int = 0) -> bytes:
+    """Build authentic encrypted X_QGROUP_REQ_USER_RSP (Opcode 3007 / 0x0BBF) envelope."""
+    xml = (
+        f'<X_QGROUP_REQ_USER_RSP docver="1">'
+        f'<RET>{ret}</RET>'
+        f'<QGROUP_ID>{qgroup_id}</QGROUP_ID>'
+        f'<INFO><QGROUP_NAME>{name}</QGROUP_NAME></INFO>'
+        f'</X_QGROUP_REQ_USER_RSP>'
+    )
+    return _xtea.build_envelope(Opcode.X_QGROUP_REQ_USER_RSP, xml, encoding="utf-8")
+
+
+def build_x_qgroup_dismiss_envelope(qgroup_id: str) -> bytes:
+    """Build authentic encrypted X_QGROUP_DISMISS (Opcode 3008 / 0x0BC0) envelope."""
+    xml = f'<X_QGROUP_DISMISS docver="1"><QGROUP_ID>{qgroup_id}</QGROUP_ID></X_QGROUP_DISMISS>'
+    return _xtea.build_envelope(Opcode.X_QGROUP_DISMISS, xml, encoding="utf-8")
+
+
+def build_x_qgroup_exit_envelope(qgroup_id: str) -> bytes:
+    """Build authentic encrypted X_QGROUP_EXIT (Opcode 3009 / 0x0BC1) envelope."""
+    xml = f'<X_QGROUP_EXIT docver="1"><QGROUP_ID>{qgroup_id}</QGROUP_ID></X_QGROUP_EXIT>'
+    return _xtea.build_envelope(Opcode.X_QGROUP_EXIT, xml, encoding="utf-8")
+
+
+def build_x_qgroup_kick_envelope(qgroup_id: str) -> bytes:
+    """Build authentic encrypted X_QGROUP_KICK (Opcode 3010 / 0x0BC2) envelope."""
+    xml = f'<X_QGROUP_KICK docver="1"><QGROUP_ID>{qgroup_id}</QGROUP_ID></X_QGROUP_KICK>'
+    return _xtea.build_envelope(Opcode.X_QGROUP_KICK, xml, encoding="utf-8")
+
+
+def build_x_qgroup_other_invite_envelope(qgroup_id: str, user_id: str) -> bytes:
+    """Build authentic encrypted X_QGROUP_OTHER_INVITE (Opcode 3012 / 0x0BC4) envelope."""
+    xml = (
+        f'<X_QGROUP_OTHER_INVITE docver="1">'
+        f'<QGROUP_ID>{qgroup_id}</QGROUP_ID>'
+        f'<USER><ID>{user_id}</ID></USER>'
+        f'</X_QGROUP_OTHER_INVITE>'
+    )
+    return _xtea.build_envelope(Opcode.X_QGROUP_OTHER_INVITE, xml, encoding="utf-8")
+
+
+def build_x_send_writting_envelope(typing: bool = True) -> bytes:
+    """Build authentic encrypted X_SEND_WRITTING (Opcode 1008 / 0x03F0) envelope."""
+    param = 1 if typing else 0
+    xml = f'<X_SEND_WRITTING docver="1"><PARAM>{param}</PARAM></X_SEND_WRITTING>'
+    return _xtea.build_envelope(Opcode.X_SEND_WRITTING, xml, encoding="utf-8")
+
+
+def build_x_change_status_envelope(status: int = 0) -> bytes:
+    """Build authentic encrypted X_CHANGE_STATUS (Opcode 1001 / 0x03E9) envelope."""
+    xml = f'<X_CHANGE_STATUS docver="1"><STATUS>{status}</STATUS></X_CHANGE_STATUS>'
+    return _xtea.build_envelope(Opcode.X_CHANGE_STATUS, xml, encoding="utf-8")
+
+
+def build_x_change_sign_envelope(signature: str = "") -> bytes:
+    """Build authentic encrypted X_CHANGE_SIGN (Opcode 1002 / 0x03EA) envelope."""
+    xml = f'<X_CHANGE_SIGN docver="1"><SIGN>{signature}</SIGN></X_CHANGE_SIGN>'
+    return _xtea.build_envelope(Opcode.X_CHANGE_SIGN, xml, encoding="gbk")
+
+
+def parse_qgroup_xml(dec_xml: str) -> dict:
+    """Extract structured QGroup fields from decrypted XML payload."""
+    res = {}
+    for tag in (
+        "QGROUP_ID",
+        "QGROUP_NAME",
+        "QGROUP_MASTER",
+        "QGROUP_INTR",
+        "QGROUP_ANN",
+        "QGROUP_INFO_VER",
+        "USER_NAME",
+        "ACTION",
+        "RET",
+        "ID",
+        "PARAM",
+        "STATUS",
+        "SIGN",
+    ):
+        s = dec_xml.find(f"<{tag}>")
+        e = dec_xml.find(f"</{tag}>")
+        if s != -1 and e != -1:
+            res[tag.lower()] = dec_xml[s + len(tag) + 2 : e].strip()
+    return res
+
+
+def build_x_recall_msg_envelope(
+    target_msg_id: int,
+    target_uuid: str = "",
+    qgroup_id: Optional[str] = None,
+    timestamp: Optional[int] = None,
+) -> bytes:
+    """Build authentic encrypted recall message envelope (X_SEND_MSG or X_QGROUP_SEND_MSG)."""
+    if timestamp is None:
+        timestamp = int(time.time())
+    if not target_uuid:
+        target_uuid = uuid.uuid4().hex
+
+    recall_json = json.dumps(
+        {
+            "app": "shiyeline",
+            "dt": [
+                {
+                    "txt": {
+                        "t": "recall",
+                        "v": "",
+                    }
+                }
+            ],
+            "id": target_uuid,
+            "target_id": target_uuid,
+            "target_msg_id": target_msg_id,
+            "type": "6",
+            "ver": "6.0",
+        },
+        ensure_ascii=False,
+        indent=3,
+        separators=(",", " : "),
+    )
+    escaped_msg = recall_json.replace('"', '&quot;').replace(' ', '&nbsp;') + "\n"
+
+    if qgroup_id:
+        xml = (
+            f'<X_QGROUP_SEND_MSG docver="1">'
+            f'<QGROUP_ID>{qgroup_id}</QGROUP_ID>'
+            f'<MSG_ID>{target_msg_id}</MSG_ID>'
+            f'<MSG>{escaped_msg}</MSG>'
+            f'<HIDE_RECORD>0</HIDE_RECORD>'
+            f'</X_QGROUP_SEND_MSG>'
+        )
+        return _xtea.build_envelope(Opcode.X_QGROUP_SEND_MSG, xml, encoding="utf-8")
+    else:
+        xml = (
+            f'<X_SEND_MSG docver="1"><MSG_ID>{target_msg_id}</MSG_ID><RECEIPT>0</RECEIPT>'
+            f'<MSG>{escaped_msg}</MSG>'
+            f'<MSG_TIME>{timestamp}</MSG_TIME><OFFLINE>0</OFFLINE><HIDE_RECORD>0</HIDE_RECORD></X_SEND_MSG>'
+        )
+        return _xtea.build_envelope(Opcode.X_SEND_MSG, xml, encoding="utf-8")
+
+
+def extract_recall_info(dec_xml: str) -> Optional[dict]:
+    """Check if decrypted XML payload contains a message recall notice and parse it."""
+    try:
+        start_msg = dec_xml.find("<MSG>")
+        end_msg = dec_xml.find("</MSG>")
+        if start_msg != -1 and end_msg != -1:
+            content_str = dec_xml[start_msg + 5 : end_msg].strip()
+            unescaped = (
+                content_str.replace("&quot;", '"')
+                .replace("&nbsp;", " ")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&amp;", "&")
+            )
+            m_json = json.loads(unescaped)
+            msg_type = str(m_json.get("type", ""))
+            dt = m_json.get("dt", [])
+            is_recall = (msg_type == "6")
+            if not is_recall and isinstance(dt, list) and len(dt) > 0:
+                if isinstance(dt[0], dict) and dt[0].get("txt", {}).get("t") == "recall":
+                    is_recall = True
+            if is_recall:
+                target_id = m_json.get("target_id") or m_json.get("id") or ""
+                target_msg_id = m_json.get("target_msg_id") or extract_msg_id(dec_xml)
+                return {
+                    "target_uuid": target_id,
+                    "target_msg_id": int(target_msg_id) if target_msg_id else 0,
+                }
+    except Exception:
+        pass
+    return None
+
+
 
