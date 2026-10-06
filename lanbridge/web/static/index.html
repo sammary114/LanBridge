@@ -588,6 +588,7 @@
                 console.error("Failed fetching files", e);
             }
         }
+        const fetchSharedFiles = fetchFiles;
 
         function switchTab(tab) {
             currentTab = tab;
@@ -915,7 +916,7 @@
                     const r = data.result;
                     alert(`原生内网通数据同步成功！\n- 账号: ${r.account || '未配置'}\n- 讨论组: 导入 ${r.groups_imported} 个\n- 共享文件: 导入 ${r.shares_imported} 个\n- 网段扫描: 同步 ${r.subnets.length} 个网段`);
                     await fetchGroups();
-                    await fetchSharedFiles();
+                    await fetchFiles();
                     await fetchContacts();
                 } else if (data.ok && !data.result.installed) {
                     alert('未检测到原生内网通默认安装目录 (C:\\Users\\Public\\Nwt)');
