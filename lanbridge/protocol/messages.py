@@ -44,6 +44,9 @@ class Opcode:
     X_PROGRESS_RECV_FILE = 0x03F4  # 1012
     X_HEARTBEAT = 0x03F8           # 1016
     X_READY = 0x03FA               # 1018
+    X_QGROUP_REQ_INFO = 0x0BBD     # 3005
+    X_QGROUP_REQ_INFO_RSP = 0x0BBE # 3006
+    X_QGROUP_SEND_MSG = 0x0BC3     # 3011
 
 
 def build_native_profile(
@@ -369,3 +372,79 @@ def build_x_msg_ack(seq: int = 0xb5c3) -> bytes:
         + "69e9b754d98ba061b0e81ef94b110d9a426afbd748cd5e93af5708318a5fcccf"
         + "59f1180d456b7fc3c86dbb00d372b1816c41dd6bdac3f9c0475f41434b3e"
     )
+
+
+def build_x_qgroup_send_msg_envelope(
+    qgroup_id: str,
+    text: str,
+    msg_id: Optional[int] = None,
+    use_emoticons: bool = True,
+) -> bytes:
+    """Build authentic encrypted X_QGROUP_SEND_MSG (Opcode 3011 / 0x0BC3) envelope."""
+    if msg_id is None:
+        msg_id = int(time.time() * 1000)
+
+    if use_emoticons:
+        try:
+            from lanbridge.emoticons import emoji_to_nwt_dt
+            dt = emoji_to_nwt_dt(text)
+        except Exception:
+            dt = [{"txt": {"t": "normal", "v": text}}]
+    else:
+        dt = [{"txt": {"t": "normal", "v": text}}]
+
+    msg_json = json.dumps(
+        {
+            "app": "shiyeline",
+            "dt": dt,
+            "ft": {
+                "b": "0",
+                "c": "0x000000",
+                "i": "0",
+                "n": "微软雅黑",
+                "s": "9",
+                "u": "0",
+            },
+            "id": uuid.uuid4().hex,
+            "type": "0",
+            "ver": "6.0",
+        },
+        ensure_ascii=False,
+        indent=3,
+        separators=(",", " : "),
+    )
+    escaped_msg = msg_json.replace('"', '&quot;').replace(' ', '&nbsp;') + "\n"
+    xml = (
+        f'<X_QGROUP_SEND_MSG docver="1">'
+        f'<QGROUP_ID>{qgroup_id}</QGROUP_ID>'
+        f'<MSG_ID>{msg_id}</MSG_ID>'
+        f'<MSG>{escaped_msg}</MSG>'
+        f'<HIDE_RECORD>0</HIDE_RECORD>'
+        f'</X_QGROUP_SEND_MSG>'
+    )
+    return _xtea.build_envelope(Opcode.X_QGROUP_SEND_MSG, xml, encoding="utf-8")
+
+
+def build_x_qgroup_req_info_envelope(qgroup_id: str) -> bytes:
+    """Build authentic encrypted X_QGROUP_REQ_INFO (Opcode 3005 / 0x0BBD) envelope."""
+    xml = f'<X_QGROUP_REQ_INFO docver="1"><QGROUP_ID>{qgroup_id}</QGROUP_ID></X_QGROUP_REQ_INFO>'
+    return _xtea.build_envelope(Opcode.X_QGROUP_REQ_INFO, xml, encoding="utf-8")
+
+
+def build_x_qgroup_req_info_rsp_envelope(qgroup_id: str, ret: int = 0) -> bytes:
+    """Build authentic encrypted X_QGROUP_REQ_INFO_RSP (Opcode 3006 / 0x0BBE) envelope."""
+    xml = f'<X_QGROUP_REQ_INFO_RSP docver="1"><RET>{ret}</RET><QGROUP_ID>{qgroup_id}</QGROUP_ID></X_QGROUP_REQ_INFO_RSP>'
+    return _xtea.build_envelope(Opcode.X_QGROUP_REQ_INFO_RSP, xml, encoding="utf-8")
+
+
+def extract_qgroup_id(dec_xml: str) -> Optional[str]:
+    """Extract QGROUP_ID from decrypted QGroup XML payload."""
+    try:
+        start = dec_xml.find("<QGROUP_ID>")
+        end = dec_xml.find("</QGROUP_ID>")
+        if start != -1 and end != -1:
+            return dec_xml[start + 11 : end].strip()
+    except Exception:
+        pass
+    return None
+

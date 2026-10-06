@@ -241,7 +241,7 @@ ip.addr == 47.57.13.180 && tcp.port == 80
 -   `docs/protocol-notes.md`：帧号、时间、五元组、字段偏移及置信度剖析。
 -   `docs/experiments.md`：分阶段抓包方案与假设验证清单。
 -   `tools/pcap-analyzer/`：PCAPNG 分析器 CLI、会话聚合与 JSON 导出工具。
-- `tests/`：自动化测试套件（80 个测试全部通过）。
+- `tests/`：自动化测试套件（88 个测试全部通过）。
 -   `reports/`：导出的机器可读协议分析结果。
 
 **当前状态**：
@@ -264,6 +264,10 @@ ip.addr == 47.57.13.180 && tcp.port == 80
   * 逆向还原并实现 TCP 2442 原生共享协议族（`X_SHARE_*` XML 信令、目录树同步、密码校验与切片流式分发）。
   * 实现群文件主动发布与撤销通知（`X_QGROUP_SHARE_FILE` 与 `X_QGROUP_DELETE_SHARE`）。
   * 首创引入 **LanBridge-Hub 影子保活（Shadow Keeper Failover）**与**阶梯式 TTL / LRU 磁盘配额清理机制**（<10MB 保留 14 天；10MB~100MB 保留 7 天；>100MB 保留 48 小时；LRU 自动淘汰至 70% 水位）。
-  * 自动化测试扩展至 **80 项**，全量通过（80/80 PASS）。
+- **零配置自驱动接入引擎（Zero-Touch Autonomous Integration & Group Chat）全面交付**：
+  * **网卡自适应与定向多广播**：`lanbridge.discovery.network` 自动枚举活动物理/虚拟网卡（剥离 loopback 和 APIPA 169.254.x），向所有活动子网定向广播和 `255.255.255.255` 并发宣告上线，双方用户均无需手动查询 IP 或配置网段。
+  * **开机静默单播穿透扫描与主动唤醒**：客户端开机后台异步驱动 `SubnetScanner` 并发单播探测本地 `/24` 所在网段，收到反馈立即主动发起 ENet Opcode 0x82 握手与 profile 推送，在对端联系人树上无感点亮在线绿标。
+  * **群组发现与群文字聊天闭环**：反编译确认并实现原生群聊 Opcode 0x0BC3（3011，`X_QGROUP_SEND_MSG`）、群信息拉取 0x0BBD（3005，`X_QGROUP_REQ_INFO`）与响应 0x0BBE（3006，`X_QGROUP_REQ_INFO_RSP`），并在 `LanBridgeClient` 提供 `send_group_message`、`sync_group_info` 与 `@client.on_group_message`。
+  * 自动化测试扩展至 **88 项**，全量通过（88/88 PASS）。
 - **当前最优先任务**：推进 M6 应用层客户端开发（现代化轻量 Web 客户端 / 极客终端 TUI 客户端 / 开放 Bot 网关）。
 

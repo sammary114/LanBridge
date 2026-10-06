@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import ipaddress
 import logging
 import os
 import random
@@ -20,6 +21,12 @@ import struct
 import time
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
+from lanbridge.discovery import (
+    SubnetScanner,
+    get_active_network_interfaces,
+    get_default_broadcast_addresses,
+    get_primary_local_ip,
+)
 from lanbridge.models import ChatMessage, Contact, FileTask, GroupSharedFile
 from lanbridge.protocol import (
     DEFAULT_GROUP,
@@ -29,6 +36,7 @@ from lanbridge.protocol import (
     DEFAULT_VERSION,
     ENetCommandType,
     ENetProtocolSession,
+    Opcode,
     ShareOpcode,
     XteaEngine,
     build_ack_response,
@@ -46,6 +54,9 @@ from lanbridge.protocol import (
     build_x_flash_screen_envelope,
     build_x_heartbeat_envelope,
     build_x_qgroup_delete_share_envelope,
+    build_x_qgroup_req_info_envelope,
+    build_x_qgroup_req_info_rsp_envelope,
+    build_x_qgroup_send_msg_envelope,
     build_x_qgroup_share_file_envelope,
     build_x_ready_envelope,
     build_x_send_image_envelope,
@@ -58,6 +69,7 @@ from lanbridge.protocol import (
     build_x_share_get_remote_rsp_envelope,
     extract_chat_message,
     extract_msg_id,
+    extract_qgroup_id,
     parse_discovery_packet,
     parse_folder_tran_packet,
     parse_minifile_packet,
@@ -73,8 +85,8 @@ class LanBridgeClient:
 
     def __init__(
         self,
-        local_ip: str = "0.0.0.0",
-        broadcast_ip: str = "172.31.127.255",
+        local_ip: Optional[str] = None,
+        broadcast_ip: Optional[Union[str, List[str]]] = None,
         user_id: str = DEFAULT_USER_ID,
         nickname: str = DEFAULT_NICKNAME,
         group: str = DEFAULT_GROUP,
@@ -89,9 +101,27 @@ class LanBridgeClient:
         max_cache_size_bytes: int = 10 * 1024 * 1024 * 1024,
         tiered_ttl_enabled: bool = True,
         shadow_max_filesize: int = 100 * 1024 * 1024,
+        auto_scan_on_start: bool = True,
     ) -> None:
-        self.local_ip = local_ip
-        self.broadcast_ip = broadcast_ip
+        if not local_ip or local_ip == "0.0.0.0":
+            primary_ip = get_primary_local_ip()
+            self.local_ip = primary_ip if primary_ip else "0.0.0.0"
+            self.bind_ip = "0.0.0.0"
+        else:
+            self.local_ip = local_ip
+            self.bind_ip = local_ip
+
+        if broadcast_ip is None:
+            self.broadcast_ips = get_default_broadcast_addresses()
+            self.broadcast_ip = self.broadcast_ips[0] if self.broadcast_ips else "255.255.255.255"
+        elif isinstance(broadcast_ip, list):
+            self.broadcast_ips = broadcast_ip
+            self.broadcast_ip = broadcast_ip[0] if broadcast_ip else "255.255.255.255"
+        else:
+            self.broadcast_ips = [broadcast_ip]
+            self.broadcast_ip = broadcast_ip
+
+        self.auto_scan_on_start = auto_scan_on_start
         self.user_id = user_id
         self.nickname = nickname
         self.group = group
@@ -119,6 +149,7 @@ class LanBridgeClient:
 
         # Event callbacks
         self._on_message_handlers: List[Callable[[ChatMessage], None]] = []
+        self._on_group_message_handlers: List[Callable[[ChatMessage], None]] = []
         self._on_contact_online_handlers: List[Callable[[Contact], None]] = []
         self._on_contact_offline_handlers: List[Callable[[Contact], None]] = []
         self._on_group_file_shared_handlers: List[Callable[[GroupSharedFile], None]] = []
@@ -134,6 +165,11 @@ class LanBridgeClient:
     def on_message(self, handler: Callable[[ChatMessage], None]) -> Callable[[ChatMessage], None]:
         """Register a callback for incoming chat messages."""
         self._on_message_handlers.append(handler)
+        return handler
+
+    def on_group_message(self, handler: Callable[[ChatMessage], None]) -> Callable[[ChatMessage], None]:
+        """Register a callback for incoming group chat messages."""
+        self._on_group_message_handlers.append(handler)
         return handler
 
     def on_contact_online(self, handler: Callable[[Contact], None]) -> Callable[[Contact], None]:
@@ -172,6 +208,13 @@ class LanBridgeClient:
             except Exception as e:
                 logger.error("Error in on_message handler: %s", e)
 
+    def emit_group_message(self, msg: ChatMessage) -> None:
+        for handler in self._on_group_message_handlers:
+            try:
+                handler(msg)
+            except Exception as e:
+                logger.error("Error in on_group_message handler: %s", e)
+
     def emit_contact_online(self, contact: Contact) -> None:
         for handler in self._on_contact_online_handlers:
             try:
@@ -209,6 +252,9 @@ class LanBridgeClient:
         if is_new:
             logger.info("Discovered new contact: UID=%s, IP=%s, DynPort=%d", peer_uid, peer_ip, dyn_port)
             self.emit_contact_online(contact)
+            if self._loop and self._loop.is_running():
+                t = asyncio.create_task(self._proactive_connect(peer_ip))
+                self._bg_tasks.append(t)
 
         # Reply with DiscoveryReply (cmd 2)
         if parsed["cmd"] == 1:
@@ -375,6 +421,47 @@ class LanBridgeClient:
             ready_env = build_x_ready_envelope(self.user_id)
             replies.extend(build_opcode_88_fragments(ready_env))
 
+        # Opcode 3011 (0x0BC3): X_QGROUP_SEND_MSG (Group Chat Message)
+        elif opcode == Opcode.X_QGROUP_SEND_MSG or "<X_QGROUP_SEND_MSG" in xml_str:
+            msg_id = extract_msg_id(xml_str)
+            text = extract_chat_message(xml_str)
+            qgroup_id = extract_qgroup_id(xml_str) or "0"
+            sender_uid = "unknown"
+            for uid, c in self.contacts.items():
+                if c.ip == peer_ip:
+                    sender_uid = uid
+                    break
+
+            import re
+            img_match = re.search(r'(\d+)\|([0-9a-fA-F]{32})', xml_str)
+            is_image = False
+            token = None
+            img_md5 = None
+            if img_match:
+                is_image = True
+                token = int(img_match.group(1))
+                img_md5 = img_match.group(2).lower()
+
+            msg_obj = ChatMessage(
+                msg_id=msg_id,
+                sender_id=sender_uid,
+                recipient_id=self.user_id,
+                text=text,
+                timestamp=time.time(),
+                is_image=is_image,
+                image_token=token,
+                image_md5=img_md5,
+                raw_xml=xml_str,
+                qgroup_id=qgroup_id,
+            )
+            self.emit_group_message(msg_obj)
+
+        # Opcode 3005 (0x0BBD): X_QGROUP_REQ_INFO
+        elif opcode == Opcode.X_QGROUP_REQ_INFO or "<X_QGROUP_REQ_INFO" in xml_str:
+            qgroup_id = extract_qgroup_id(xml_str) or "0"
+            rsp_env = build_x_qgroup_req_info_rsp_envelope(qgroup_id=qgroup_id, ret=0)
+            replies.extend(build_opcode_88_fragments(rsp_env))
+
         # Group File Share Announcement (X_QGROUP_SHARE_FILE)
         elif opcode == ShareOpcode.X_QGROUP_SHARE_FILE or "<X_QGROUP_SHARE_FILE" in xml_str:
             share_dict = parse_share_xml(xml_str)
@@ -467,20 +554,20 @@ class LanBridgeClient:
         sock_9011 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock_9011.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock_9011.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        sock_9011.bind((self.local_ip, self.discovery_port))
+        sock_9011.bind((self.bind_ip, self.discovery_port))
         t1, _ = await self._loop.create_datagram_endpoint(lambda: DiscoveryProtocol(self), sock=sock_9011)
         self._udp_9011_transport = t1
 
         sock_9012 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock_9012.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock_9012.bind((self.local_ip, self.main_port))
+        sock_9012.bind((self.bind_ip, self.main_port))
         t2, _ = await self._loop.create_datagram_endpoint(lambda: MainProtocol(self), sock=sock_9012)
         self._udp_9012_transport = t2
 
         # 3. Start TCP Mini-File / FolderTran Server
         self._tcp_server = await asyncio.start_server(
             self._handle_tcp_client,
-            self.local_ip,
+            self.bind_ip,
             self.tcp_file_port,
         )
 
@@ -488,10 +575,10 @@ class LanBridgeClient:
         try:
             self._tcp_share_server = await asyncio.start_server(
                 self._handle_tcp_share_client,
-                self.local_ip,
+                self.bind_ip,
                 self.share_port,
             )
-            logger.info("TCP Share Server listening on %s:%d", self.local_ip, self.share_port)
+            logger.info("TCP Share Server listening on %s:%d", self.bind_ip, self.share_port)
         except Exception as e:
             logger.warning("Could not bind TCP share port %d: %s", self.share_port, e)
 
@@ -499,8 +586,13 @@ class LanBridgeClient:
             "LanBridgeClient started: UDP 9011/9012 & TCP %d (Mini-File), TCP %d (Share) on %s",
             self.tcp_file_port,
             self.share_port,
-            self.local_ip,
+            self.bind_ip,
         )
+
+        # 5. Proactive zero-touch auto scan task
+        if self.auto_scan_on_start and self.bind_ip != "127.0.0.1":
+            scan_task = asyncio.create_task(self._auto_subnet_scan_task())
+            self._bg_tasks.append(scan_task)
 
 
     async def _handle_tcp_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -1020,17 +1112,68 @@ class LanBridgeClient:
             logger.debug("[ShadowKeeper] Background cache skipped or failed for %s: %s", shared_file.filename, e)
 
     async def broadcast_presence(self) -> None:
-        """Send a UDP 9011 presence broadcast to announce online status."""
-        pkt = build_nwt_discovery_packet(
-            cmd=1,
-            user_id=self.user_id,
-            broadcast_ip=self.broadcast_ip,
-            dynamic_port=self.dynamic_port,
-            guid=self.guid,
-        )
-        if self._udp_9011_transport:
-            self._udp_9011_transport.sendto(pkt, (self.broadcast_ip, self.discovery_port))
-            logger.info("Sent discovery broadcast to %s:%d", self.broadcast_ip, self.discovery_port)
+        """Send UDP 9011 presence broadcasts to all configured broadcast destinations."""
+        if not self._udp_9011_transport:
+            return
+        for b_ip in self.broadcast_ips:
+            pkt = build_nwt_discovery_packet(
+                cmd=1,
+                user_id=self.user_id,
+                broadcast_ip=b_ip,
+                dynamic_port=self.dynamic_port,
+                guid=self.guid,
+            )
+            try:
+                self._udp_9011_transport.sendto(pkt, (b_ip, self.discovery_port))
+                logger.info("Sent discovery broadcast to %s:%d", b_ip, self.discovery_port)
+            except Exception as e:
+                logger.warning("Failed sending discovery broadcast to %s: %s", b_ip, e)
+
+    async def _proactive_connect(self, peer_ip: str) -> None:
+        """Initiate proactive ENet connection (Opcode 0x82) to peer."""
+        session = self.get_session(peer_ip)
+        connect_pkt = session.build_connect(b"\x01\x02\x03\x04")
+        if self._udp_9012_transport:
+            try:
+                self._udp_9012_transport.sendto(connect_pkt, (peer_ip, self.main_port))
+                logger.debug("Sent proactive ENet connect to %s:%d", peer_ip, self.main_port)
+            except Exception as e:
+                logger.debug("Failed sending proactive connect to %s: %s", peer_ip, e)
+
+    async def _auto_subnet_scan_task(self) -> None:
+        """Asynchronously scan local subnets on startup to discover Nwt instances."""
+        try:
+            await asyncio.sleep(0.1)
+            await self.broadcast_presence()
+
+            interfaces = get_active_network_interfaces()
+            targets: List[str] = []
+            for iface in interfaces:
+                try:
+                    net24 = ipaddress.ip_network(f"{iface.ip}/24", strict=False)
+                    targets.append(str(net24))
+                except Exception as e:
+                    logger.debug("Failed computing /24 for interface %s: %s", iface.name, e)
+
+            if targets:
+                logger.info("Initiating auto subnet scan across: %s", targets)
+                scanner = SubnetScanner(
+                    local_user_id=self.user_id,
+                    discovery_port=self.discovery_port,
+                    listen_timeout=1.0,
+                    rate_limit_delay=0.001,
+                )
+                discovered = await scanner.scan(targets, bind_ip="0.0.0.0")
+                for contact in discovered:
+                    if contact.user_id not in self.contacts and contact.user_id != self.user_id:
+                        self.contacts[contact.user_id] = contact
+                        self.emit_contact_online(contact)
+                        logger.info("Auto-scan discovered peer: UID=%s, IP=%s", contact.user_id, contact.ip)
+                        await self._proactive_connect(contact.ip)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.warning("Error during auto subnet scan: %s", e)
 
     async def send_message(self, target_ip: str, text: str) -> None:
         """Send a text message to a specific IP endpoint."""
@@ -1040,6 +1183,49 @@ class LanBridgeClient:
             for frag in frags:
                 self._udp_9012_transport.sendto(frag, (target_ip, self.main_port))
             logger.info("Sent message to %s: '%s'", target_ip, text[:30])
+
+    async def send_group_message(
+        self,
+        qgroup_id: str,
+        text: str,
+        target_ip: Optional[str] = None,
+    ) -> None:
+        """Send a text message to a specific QGroup.
+        
+        If target_ip is provided, sends to that peer; otherwise broadcasts to all contacts
+        and configured broadcast addresses.
+        """
+        env = build_x_qgroup_send_msg_envelope(qgroup_id=qgroup_id, text=text)
+        frags = build_opcode_88_fragments(env)
+        if not self._udp_9012_transport:
+            return
+
+        destinations = set()
+        if target_ip:
+            destinations.add(target_ip)
+        else:
+            for c in self.contacts.values():
+                if c.ip:
+                    destinations.add(c.ip)
+            for b_ip in self.broadcast_ips:
+                destinations.add(b_ip)
+
+        for dest in destinations:
+            for frag in frags:
+                try:
+                    self._udp_9012_transport.sendto(frag, (dest, self.main_port))
+                except Exception as e:
+                    logger.debug("Failed sending group msg frag to %s: %s", dest, e)
+        logger.info("Sent group msg to %s (len=%d) -> %d destinations", qgroup_id, len(text), len(destinations))
+
+    async def sync_group_info(self, qgroup_id: str, target_ip: str) -> None:
+        """Request QGroup metadata and member directory via Opcode 3005."""
+        env = build_x_qgroup_req_info_envelope(qgroup_id=qgroup_id)
+        frags = build_opcode_88_fragments(env)
+        if self._udp_9012_transport:
+            for frag in frags:
+                self._udp_9012_transport.sendto(frag, (target_ip, self.main_port))
+            logger.info("Sent X_QGROUP_REQ_INFO for group %s -> %s", qgroup_id, target_ip)
 
     async def send_image(
         self,

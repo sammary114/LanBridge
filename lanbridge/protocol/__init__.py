@@ -61,6 +61,10 @@ from lanbridge.protocol.messages import (
     extract_msg_id,
     build_x_input_state,
     build_x_msg_ack,
+    build_x_qgroup_send_msg_envelope,
+    build_x_qgroup_req_info_envelope,
+    build_x_qgroup_req_info_rsp_envelope,
+    extract_qgroup_id,
 )
 from lanbridge.protocol.folder_tran import (
     build_folder_tran_response,
@@ -139,6 +143,10 @@ __all__ = [
     "extract_msg_id",
     "build_x_input_state",
     "build_x_msg_ack",
+    "build_x_qgroup_send_msg_envelope",
+    "build_x_qgroup_req_info_envelope",
+    "build_x_qgroup_req_info_rsp_envelope",
+    "extract_qgroup_id",
     "build_folder_tran_response",
     "build_folder_tran_chunk",
     "parse_folder_tran_packet",

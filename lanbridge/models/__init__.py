@@ -39,6 +39,7 @@ class ChatMessage:
     image_token: Optional[int] = None
     image_md5: Optional[str] = None
     raw_xml: Optional[str] = None
+    qgroup_id: Optional[str] = None
 
 
 @dataclass
