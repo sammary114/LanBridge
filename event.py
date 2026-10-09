@@ -35,21 +35,44 @@ class LanBridgePlatformEvent(AstrMessageEvent):
         super().__init__(message_str, message_obj, platform_meta, session_id)
         self.client = client
 
-    async def send(self, message: MessageChain):
-        """Send a MessageChain reply back to the sender in NeiWangTong."""
+    def get_group_id(self) -> Optional[str]:
+        """Get group ID if message is from a QGroup."""
+        return getattr(self.message_obj, "group_id", None)
+
+    async def typing(self, typing: bool = True):
+        """Send authentic typing indicator (Opcode 1008) to peer in 1v1 chat."""
         target_id = self.get_sender_id()
+        if not self.get_group_id():
+            try:
+                await self.client.send_typing(target=target_id, typing=typing)
+            except Exception as e:
+                logger.debug("Failed sending typing indicator: %s", e)
+
+    async def send(self, message: MessageChain):
+        """Send a MessageChain reply back to the sender or group in NeiWangTong."""
+        group_id = self.get_group_id()
+        is_group = bool(group_id)
+        target_id = self.get_sender_id()
+
         for component in message.chain:
             if isinstance(component, Plain):
-                await self.client.send_text(target=target_id, text=component.text)
+                if is_group and group_id:
+                    await self.client.send_group_text(qgroup_id=group_id, text=component.text)
+                else:
+                    await self.client.send_text(target=target_id, text=component.text)
             elif isinstance(component, Image):
-                # When an image is received from LLM or plugin, resolve to file path
                 img_path = await component.convert_to_file_path()
-                logger.info("Sending image to %s: %s", target_id, img_path)
-                # LanBridge file transfer or notification
-                await self.client.send_text(target=target_id, text=f"[图片: {img_path}]")
+                logger.info("Sending authentic CFolderTranEngine image to %s: %s", group_id if is_group else target_id, img_path)
+                if is_group and group_id:
+                    await self.client.send_group_image(qgroup_id=group_id, image=img_path)
+                else:
+                    await self.client.send_image(target=target_id, image=img_path)
             else:
                 text_repr = getattr(component, "text", str(component))
                 if text_repr:
-                    await self.client.send_text(target=target_id, text=text_repr)
+                    if is_group and group_id:
+                        await self.client.send_group_text(qgroup_id=group_id, text=text_repr)
+                    else:
+                        await self.client.send_text(target=target_id, text=text_repr)
 
         await super().send(message)

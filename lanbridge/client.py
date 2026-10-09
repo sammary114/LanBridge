@@ -12,9 +12,10 @@ from dataclasses import dataclass, field
 import logging
 import random
 import socket
+import os
 import struct
 import time
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Tuple
+from typing import Any, Callable, Coroutine, Dict, List, Optional, Tuple, Union
 
 from .crypto import XTEACipher
 from .enet import ENetCommandType, ENetProtocolSession
@@ -24,6 +25,7 @@ from .protocol import (
     OP_HANDSHAKE,
     OP_HEARTBEAT,
     OP_MSG_ACK,
+    OP_QGROUP_SEND_MSG,
     OP_QUIT,
     OP_READY,
     OP_SEND_MSG,
@@ -31,13 +33,20 @@ from .protocol import (
     build_change_status_xml,
     build_discovery_packet,
     build_flash_screen_xml,
+    build_folder_tran_chunk,
+    build_folder_tran_response,
     build_handshake_xml,
     build_msg_ack_xml,
+    build_qgroup_send_image_xml,
+    build_qgroup_send_msg_xml,
     build_recall_xml,
+    build_send_image_xml,
     build_send_msg_xml,
     build_typing_xml,
     extract_chat_text,
+    extract_qgroup_chat_text,
     parse_discovery_packet,
+    parse_folder_tran_packet,
 )
 
 logger = logging.getLogger("lanbridge")
@@ -48,6 +57,7 @@ class ClientConfig:
     bind_ip: str = "0.0.0.0"
     discovery_port: int = 9011
     data_port: int = 9012
+    image_port: int = 9013
     user_id: str = ""
     username: str = "LanBridge-Bot"
     hostname: str = "DESKTOP-LANBRIDGE"
@@ -82,6 +92,9 @@ class LanBridgeMessage:
     raw_xml: str
     timestamp: float
     peer: Optional[PeerInfo] = None
+    qgroup_id: Optional[str] = None
+    is_image: bool = False
+    image_md5: Optional[str] = None
 
 
 class _UDPProtocol(asyncio.DatagramProtocol):
@@ -111,9 +124,16 @@ class LanBridgeClient:
 
         # Callbacks
         self.on_message: Optional[Callable[[LanBridgeMessage], Coroutine[Any, Any, None]]] = None
+        self.on_group_message: Optional[Callable[[LanBridgeMessage], Coroutine[Any, Any, None]]] = None
+        self.on_typing: Optional[Callable[[str, int], Coroutine[Any, Any, None]]] = None
         self.on_shake: Optional[Callable[[str, PeerInfo], Coroutine[Any, Any, None]]] = None
         self.on_peer_online: Optional[Callable[[PeerInfo], Coroutine[Any, Any, None]]] = None
         self.on_peer_offline: Optional[Callable[[str], Coroutine[Any, Any, None]]] = None
+
+        # Image transfer cache (CFolderTranEngine TCP 9013)
+        self.pending_images: Dict[str, bytes] = {}  # md5 -> bytes
+        self.pending_tokens: Dict[int, str] = {}    # token -> md5
+        self._tcp_server: Optional[asyncio.Server] = None
 
         self._transport_9011: Optional[asyncio.DatagramTransport] = None
         self._transport_9012: Optional[asyncio.DatagramTransport] = None
@@ -128,7 +148,7 @@ class LanBridgeClient:
         return self.sessions[key]
 
     async def start(self):
-        """Start listening on UDP 9011 (discovery) and UDP 9012 (ENet)."""
+        """Start listening on UDP 9011 (discovery), UDP 9012 (ENet), and TCP 9013 (images)."""
         self._loop = asyncio.get_running_loop()
         self._running = True
 
@@ -152,15 +172,73 @@ class LanBridgeClient:
             lambda: _UDPProtocol(self._handle_9012_packet), sock=sock_9012
         )
 
+        # Start TCP Server for CFolderTranEngine (Images / Mini-File)
+        try:
+            self._tcp_server = await asyncio.start_server(
+                self._handle_tcp_client, self.config.bind_ip, self.config.image_port
+            )
+            logger.info(
+                "CFolderTranEngine TCP server listening on %s:%d",
+                self.config.bind_ip,
+                self.config.image_port,
+            )
+        except Exception as e:
+            logger.warning("Failed to start CFolderTranEngine TCP server on port %d: %s", self.config.image_port, e)
+
         logger.info(
-            "LanBridgeClient started on %s (Discovery: %d, Data: %d)",
+            "LanBridgeClient started on %s (Discovery: %d, Data: %d, Image: %d)",
             self.config.bind_ip,
             self.config.discovery_port,
             self.config.data_port,
+            self.config.image_port,
         )
 
         # Start periodic presence broadcast / heartbeat
         self._heartbeat_task = asyncio.create_task(self._periodic_loop())
+
+    async def _handle_tcp_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        """Handle incoming CFolderTranEngine TCP connection for downloading inline images."""
+        try:
+            while True:
+                header = await reader.read(4)
+                if not header or len(header) < 4:
+                    break
+                pkt_len = struct.unpack(">I", header)[0]
+                rest_data = await reader.readexactly(pkt_len - 4)
+                data = header + rest_data
+                parsed = parse_folder_tran_packet(data)
+                if not parsed:
+                    continue
+                cmd = parsed.get("cmd")
+                if cmd == 1:
+                    token = parsed.get("token", 0)
+                    md5 = parsed.get("md5", "")
+                    if not md5 and token in self.pending_tokens:
+                        md5 = self.pending_tokens[token]
+                    img_data = self.pending_images.get(md5, b"")
+                    rsp = build_folder_tran_response(len(img_data), token=token)
+                    writer.write(rsp)
+                    await writer.drain()
+                elif cmd == 3:
+                    token = parsed.get("token", 0)
+                    offset = parsed.get("offset", 0)
+                    chunk_len = parsed.get("chunk_len", 16384)
+                    md5 = self.pending_tokens.get(token, "")
+                    img_data = self.pending_images.get(md5, b"")
+                    chunk_slice = img_data[offset : offset + chunk_len]
+                    chunk_pkt = build_folder_tran_chunk(len(img_data), offset, chunk_slice, token=token)
+                    writer.write(chunk_pkt)
+                    await writer.drain()
+        except (asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError):
+            pass
+        except Exception as e:
+            logger.debug("TCP client handler exception: %s", e)
+        finally:
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
 
     async def stop(self):
         """Stop client and close sockets."""
@@ -170,6 +248,13 @@ class LanBridgeClient:
             try:
                 await self._heartbeat_task
             except asyncio.CancelledError:
+                pass
+
+        if self._tcp_server:
+            self._tcp_server.close()
+            try:
+                await self._tcp_server.wait_closed()
+            except Exception:
                 pass
 
         if self._transport_9011:
@@ -353,7 +438,52 @@ class LanBridgeClient:
             if self.on_shake and peer:
                 asyncio.create_task(self.on_shake(sender_id, peer))
 
-        # 4. Quit / Offline
+        # 4. Typing Indicator
+        elif opcode == OP_SEND_WRITING:
+            sender_id = peer.user_id if peer else ip
+            logger.debug("Received typing indicator from %s", sender_id)
+            if self.on_typing:
+                asyncio.create_task(self.on_typing(sender_id, 1))
+
+        # 5. QGroup Chat Message
+        elif opcode == OP_QGROUP_SEND_MSG:
+            extracted = extract_qgroup_chat_text(plain_text)
+            if extracted:
+                qgroup_id, msg_id, text, json_data = extracted
+                sender_id = peer.user_id if peer else ip
+                sender_name = peer.username if peer else ip
+
+                # Check if message contains image
+                is_img = False
+                img_md5 = None
+                if "dt" in json_data and isinstance(json_data["dt"], list):
+                    for item in json_data["dt"]:
+                        if "img" in item:
+                            is_img = True
+                            v = item["img"].get("v", "")
+                            if "|" in v:
+                                img_md5 = v.split("|")[1]
+                            else:
+                                img_md5 = v
+
+                msg = LanBridgeMessage(
+                    msg_id=msg_id,
+                    sender_id=sender_id,
+                    sender_name=sender_name,
+                    text=text,
+                    raw_xml=plain_text,
+                    timestamp=time.time(),
+                    peer=peer,
+                    qgroup_id=qgroup_id,
+                    is_image=is_img,
+                    image_md5=img_md5,
+                )
+                if self.on_group_message:
+                    asyncio.create_task(self.on_group_message(msg))
+                elif self.on_message:
+                    asyncio.create_task(self.on_message(msg))
+
+        # 6. Quit / Offline
         elif opcode == OP_QUIT:
             sender_id = peer.user_id if peer else ip
             if sender_id in self.peers:
@@ -387,6 +517,138 @@ class LanBridgeClient:
 
         logger.info("Sent message [%s] to %s: %s", msg_id, target_ip, text[:50])
         return msg_id
+
+    async def send_image(self, target: str, image: Any, caption: str = "") -> str:
+        """Send inline image to peer or IP via CFolderTranEngine."""
+        if isinstance(image, str):
+            if os.path.isfile(image):
+                with open(image, "rb") as f:
+                    img_data = f.read()
+            else:
+                raise FileNotFoundError(f"Image file not found: {image}")
+        elif isinstance(image, bytes):
+            img_data = image
+        else:
+            raise ValueError("Image must be bytes or file path")
+
+        import hashlib
+        img_md5 = hashlib.md5(img_data).hexdigest().lower()
+        token = random.randint(10000, 30000)
+        self.pending_images[img_md5] = img_data
+        self.pending_tokens[token] = img_md5
+
+        peer = self.peers.get(target) or self.ip_to_peer.get(target)
+        target_ip = peer.ip if peer else target
+        target_port = peer.port if peer else 9012
+
+        xml_bytes, msg_id = build_send_image_xml(img_md5=img_md5, token=token, caption=caption)
+        encrypted_env = self.cipher.encrypt_envelope(OP_SEND_MSG, xml_bytes)
+        session = self.get_session(target_ip, target_port)
+
+        if len(encrypted_env) > 1300:
+            pkts = session.build_fragments(channel=0, payload=encrypted_env)
+            for pkt in pkts:
+                self._transport_9012.sendto(pkt, (target_ip, target_port))
+                await asyncio.sleep(0.01)
+        else:
+            pkt = session.build_reliable(channel=0, payload=encrypted_env)
+            self._transport_9012.sendto(pkt, (target_ip, target_port))
+
+        logger.info("Sent image [%s, MD5=%s, Token=%d] to %s", msg_id, img_md5, token, target_ip)
+        return img_md5
+
+    async def send_group_text(self, qgroup_id: str, text: str, target: Optional[str] = None) -> str:
+        """Send group text message to a specific peer or broadcast to all known peers."""
+        xml_bytes, msg_id = build_qgroup_send_msg_xml(qgroup_id=qgroup_id, content=text)
+        encrypted_env = self.cipher.encrypt_envelope(OP_QGROUP_SEND_MSG, xml_bytes)
+
+        targets = [target] if target else list(self.peers.keys())
+        if not targets:
+            targets = list(self.ip_to_peer.keys())
+
+        for tgt in targets:
+            peer = self.peers.get(tgt) or self.ip_to_peer.get(tgt)
+            target_ip = peer.ip if peer else tgt
+            target_port = peer.port if peer else 9012
+            session = self.get_session(target_ip, target_port)
+            if len(encrypted_env) > 1300:
+                pkts = session.build_fragments(channel=0, payload=encrypted_env)
+                for pkt in pkts:
+                    self._transport_9012.sendto(pkt, (target_ip, target_port))
+                    await asyncio.sleep(0.01)
+            else:
+                pkt = session.build_reliable(channel=0, payload=encrypted_env)
+                self._transport_9012.sendto(pkt, (target_ip, target_port))
+
+        logger.info("Sent group text [%s] to group %s", msg_id, qgroup_id)
+        return msg_id
+
+    async def send_group_image(self, qgroup_id: str, image: Any, caption: str = "", target: Optional[str] = None) -> str:
+        """Send group inline image via CFolderTranEngine."""
+        if isinstance(image, str):
+            if os.path.isfile(image):
+                with open(image, "rb") as f:
+                    img_data = f.read()
+            else:
+                raise FileNotFoundError(f"Image file not found: {image}")
+        elif isinstance(image, bytes):
+            img_data = image
+        else:
+            raise ValueError("Image must be bytes or file path")
+
+        import hashlib
+        img_md5 = hashlib.md5(img_data).hexdigest().lower()
+        token = random.randint(10000, 30000)
+        self.pending_images[img_md5] = img_data
+        self.pending_tokens[token] = img_md5
+
+        xml_bytes, msg_id = build_qgroup_send_image_xml(qgroup_id=qgroup_id, img_md5=img_md5, token=token, caption=caption)
+        encrypted_env = self.cipher.encrypt_envelope(OP_QGROUP_SEND_MSG, xml_bytes)
+
+        targets = [target] if target else list(self.peers.keys())
+        if not targets:
+            targets = list(self.ip_to_peer.keys())
+
+        for tgt in targets:
+            peer = self.peers.get(tgt) or self.ip_to_peer.get(tgt)
+            target_ip = peer.ip if peer else tgt
+            target_port = peer.port if peer else 9012
+            session = self.get_session(target_ip, target_port)
+            if len(encrypted_env) > 1300:
+                pkts = session.build_fragments(channel=0, payload=encrypted_env)
+                for pkt in pkts:
+                    self._transport_9012.sendto(pkt, (target_ip, target_port))
+                    await asyncio.sleep(0.01)
+            else:
+                pkt = session.build_reliable(channel=0, payload=encrypted_env)
+                self._transport_9012.sendto(pkt, (target_ip, target_port))
+
+        logger.info("Sent group image [%s, MD5=%s] to group %s", msg_id, img_md5, qgroup_id)
+        return img_md5
+
+    async def send_typing(self, target: str, typing: bool = True) -> bool:
+        """Send typing indicator (Opcode 1008) to target."""
+        peer = self.peers.get(target) or self.ip_to_peer.get(target)
+        target_ip = peer.ip if peer else target
+        target_port = peer.port if peer else 9012
+
+        xml_bytes = build_typing_xml(state=1 if typing else 0)
+        encrypted_env = self.cipher.encrypt_envelope(OP_SEND_WRITING, xml_bytes)
+        session = self.get_session(target_ip, target_port)
+        pkt = session.build_reliable(channel=0, payload=encrypted_env)
+        self._transport_9012.sendto(pkt, (target_ip, target_port))
+        logger.debug("Sent typing indicator (%s) to %s", typing, target_ip)
+        return True
+
+    async def change_status(self, status: int = 1) -> None:
+        """Change online status (1=Online, 2=Away, 3=Busy, 4=Offline) and broadcast to peers."""
+        status_xml = build_change_status_xml(status=status)
+        status_env = self.cipher.encrypt_envelope(OP_CHANGE_STATUS, status_xml)
+        for peer in list(self.peers.values()):
+            session = self.get_session(peer.ip, peer.port)
+            pkt = session.build_reliable(channel=0, payload=status_env)
+            self._transport_9012.sendto(pkt, (peer.ip, peer.port))
+        logger.info("Changed status to %d and notified %d peers", status, len(self.peers))
 
     async def send_shake(self, target: str) -> bool:
         """Send window shake / flash screen to peer."""

@@ -1,6 +1,6 @@
 # AstrBot 内网通平台适配器插件 (astrbot_plugin_lanbridge)
 
-[![Tests](https://img.shields.io/badge/tests-17%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-33%20passed-brightgreen.svg)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)]()
 [![AstrBot](https://img.shields.io/badge/AstrBot-%3E%3D4.0.0-orange.svg)](https://astrbot.app)
 
@@ -15,12 +15,17 @@
 - **原生协议级兼容**：完全还原内网通可靠 UDP 传输协议（ENet 协议栈）与 32 轮 XTEA 密码机（GBK 编码）。
 - **零额外 C 扩展依赖**：核心网络与加密引擎完全基于 Python 原生 `asyncio`、`socket` 与 `struct` 实现，轻量、稳定、高并发。
 - **自动握手与好友列表点亮**：支持监听 UDP 9011 发现广播，自动应答 304 字节发现帧与 `<X_HANDSHARK>` 名片信令，在内网通端显示在线绿色徽标。
-- **双向即时会话**：
-  - 自动接收内网通私聊文本消息，转为 AstrBot 的标准 `MessageChain` 提交核心处理管道。
+- **双向即时会话（私聊 & 群聊）**：
+  - 自动接收内网通私聊与多人讨论组（QGroup）文本消息，转为 AstrBot 的标准 `MessageChain` 提交核心处理管道。
   - 支持将大模型回复渲染回内网通客户端（富文本 JSON 封包与自动送达回执 ACK）。
-- **高级交互支持**：
+- **图片双向原图收发**：
+  - 内置原生 `CFolderTranEngine` TCP 9013 微文件传输引擎。
+  - 支持双向无损收发高清图片（支持私聊及讨论组群图片分片流传与 MD5 校验）。
+- **高级交互与状态机制**：
+  - 自动触发正在输入指示（`<X_SEND_WRITTING>`），提供更真实的 AI 打字体验。
+  - 支持动态切换机器人在线状态（`/lanbridge_status 1=在线/2=离开/3=忙碌/4=离线`）。
   - 支持检测与响应窗口抖动（`<X_SEND_FLASH_SCREEN>`）。
-  - 支持正在输入状态提示（`<X_SEND_WRITTING>`）。
+  - 支持 84 种内网通原生表情与 Emoji 双向映射转换。
   - 支持消息防超时重传与分片组装（SendFragment 0x88 拆装包）。
 
 ---
@@ -79,10 +84,12 @@ git clone -b astrbot-adapter <本仓库地址> astrbot_plugin_lanbridge
 | `bind_ip` | string | `"0.0.0.0"` | 绑定的本地网卡 IP（如果使用虚拟机/Sandbox，填宿主机虚拟网卡 IP，例如 `172.31.112.1`） |
 | `discovery_port` | int | `9011` | 内网通设备发现与广播端口（默认 `9011`） |
 | `data_port` | int | `9012` | 内网通私有 ENet 数据通讯端口（默认 `9012`） |
+| `image_port` | int | `9013` | CFolderTranEngine TCP 图片传输端口（默认 `9013`） |
 | `bot_name` | string | `"LanBridge-AI助手"` | 显示在内网通好友列表中的昵称 |
 | `bot_sign` | string | `"由 AstrBot 驱动的内网通 AI 助手"` | 显示在好友名片中的签名 |
 | `corp_id` | string | `""` | 组织号（若内网通客户端设置了组织号，两端需保持一致） |
 | `auto_shake_back` | bool | `false` | 当收到内网通好友发送的窗口抖动时，是否自动反向抖动对端 |
+| `auto_typing` | bool | `true` | 收到私聊消息时，是否自动向好友发送“正在输入”状态提示 |
 
 ---
 
@@ -109,13 +116,16 @@ test_enet_session_reliable_and_ack (test_lanbridge_sdk.TestLanBridgeSDK.test_ene
 test_flash_screen_xml (test_lanbridge_sdk.TestLanBridgeSDK.test_flash_screen_xml) ... ok
 test_handshake_xml (test_lanbridge_sdk.TestLanBridgeSDK.test_handshake_xml) ... ok
 test_recall_msg_xml (test_lanbridge_sdk.TestLanBridgeSDK.test_recall_msg_xml) ... ok
-test_send_msg_xml_and_extract (test_lanbridge_sdk.TestLanBridgeSDK.test_send_msg_xml_and_extract) ... ok
-test_xtea_arbitrary_length_padding (test_lanbridge_sdk.TestLanBridgeSDK.test_xtea_arbitrary_length_padding) ... ok
-test_xtea_basic_roundtrip (test_lanbridge_sdk.TestLanBridgeSDK.test_xtea_basic_roundtrip) ... ok
+test_event_send_group_text_and_image (test_astrbot_adapter.TestAstrBotAdapter.test_event_send_group_text_and_image) ... ok
+test_event_send_image_1v1 (test_astrbot_adapter.TestAstrBotAdapter.test_event_send_image_1v1) ... ok
+test_event_typing (test_astrbot_adapter.TestAstrBotAdapter.test_event_typing) ... ok
+test_folder_tran_packets (test_lanbridge_sdk.TestLanBridgeSDK.test_folder_tran_packets) ... ok
+test_qgroup_send_and_extract (test_lanbridge_sdk.TestLanBridgeSDK.test_qgroup_send_and_extract) ... ok
+test_send_image_xml (test_lanbridge_sdk.TestLanBridgeSDK.test_send_image_xml) ... ok
 test_xtea_envelope_packing (test_lanbridge_sdk.TestLanBridgeSDK.test_xtea_envelope_packing) ... ok
 
 ----------------------------------------------------------------------
-Ran 17 tests in 0.048s
+Ran 33 tests in 0.111s
 
 OK
 ```

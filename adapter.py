@@ -14,6 +14,7 @@ from typing import Any, Optional
 try:
     from .compat import (
         AstrBotMessage,
+        Image,
         MessageChain,
         MessageMember,
         MessageSession,
@@ -29,6 +30,7 @@ try:
 except (ImportError, ValueError):
     from compat import (
         AstrBotMessage,
+        Image,
         MessageChain,
         MessageMember,
         MessageSession,
@@ -53,7 +55,9 @@ except (ImportError, ValueError):
         "corp_id": "",
         "discovery_port": 9011,
         "data_port": 9012,
+        "image_port": 9013,
         "auto_shake_back": False,
+        "auto_typing": True,
     },
 )
 class LanBridgePlatformAdapter(Platform):
@@ -74,6 +78,7 @@ class LanBridgePlatformAdapter(Platform):
             bind_ip=self.config.get("bind_ip", "0.0.0.0"),
             discovery_port=int(self.config.get("discovery_port", 9011)),
             data_port=int(self.config.get("data_port", 9012)),
+            image_port=int(self.config.get("image_port", 9013)),
             username=self.config.get("bot_name", "LanBridge-AI助手"),
             sign=self.config.get("bot_sign", "由 AstrBot 大模型驱动的内网通 AI 助手"),
             corp_id=self.config.get("corp_id", ""),
@@ -95,7 +100,22 @@ class LanBridgePlatformAdapter(Platform):
 
         # Setup callbacks
         async def _on_client_message(msg: LanBridgeMessage):
-            logger.info("Received NeiWangTong message from %s: %s", msg.sender_id, msg.text)
+            logger.info("Received NeiWangTong 1v1 message from %s: %s", msg.sender_id, msg.text)
+            if self.config.get("auto_typing", True) and not msg.qgroup_id:
+                try:
+                    await self.client.send_typing(target=msg.sender_id, typing=True)
+                except Exception as e:
+                    logger.debug("Failed sending auto typing indicator: %s", e)
+            abm = await self.convert_message(msg)
+            await self.handle_msg(abm)
+
+        async def _on_client_group_message(msg: LanBridgeMessage):
+            logger.info(
+                "Received NeiWangTong group message from %s in group %s: %s",
+                msg.sender_id,
+                msg.qgroup_id,
+                msg.text,
+            )
             abm = await self.convert_message(msg)
             await self.handle_msg(abm)
 
@@ -105,6 +125,7 @@ class LanBridgePlatformAdapter(Platform):
                 await self.client.send_shake(target=sender_id)
 
         self.client.on_message = _on_client_message
+        self.client.on_group_message = _on_client_group_message
         self.client.on_shake = _on_client_shake
 
         # Start LanBridge client network loop
@@ -121,16 +142,32 @@ class LanBridgePlatformAdapter(Platform):
     async def convert_message(self, msg: LanBridgeMessage) -> AstrBotMessage:
         """Convert a LanBridge message into an AstrBotMessage object."""
         abm = AstrBotMessage()
-        abm.type = MessageType.FRIEND_MESSAGE  # 1v1 private chat
+        if msg.qgroup_id:
+            abm.type = MessageType.GROUP_MESSAGE
+            clean_gid = str(msg.qgroup_id).replace("qgroup_", "")
+            abm.group_id = clean_gid
+            abm.session_id = f"qgroup_{clean_gid}"
+        else:
+            abm.type = MessageType.FRIEND_MESSAGE
+            abm.session_id = msg.sender_id
+
         abm.message_str = msg.text
         abm.sender = MessageMember(
             user_id=msg.sender_id,
             nickname=msg.sender_name,
         )
-        abm.message = [Plain(text=msg.text)]
+
+        elements = []
+        if msg.text:
+            elements.append(Plain(text=msg.text))
+        if msg.is_image and msg.image_md5:
+            elements.append(Image(file=msg.image_md5))
+        if not elements:
+            elements = [Plain(text=msg.text or "")]
+
+        abm.message = elements
         abm.raw_message = msg.raw_xml
         abm.self_id = self.client.config.user_id
-        abm.session_id = msg.sender_id
         abm.message_id = msg.msg_id
         return abm
 
@@ -150,16 +187,41 @@ class LanBridgePlatformAdapter(Platform):
     ):
         """Send message proactively by AstrBot session."""
         target_id = getattr(session, "session_id", str(session))
+        is_group = False
+        group_id = None
+        if getattr(session, "group_id", None):
+            is_group = True
+            group_id = getattr(session, "group_id")
+        elif str(target_id).startswith("qgroup_"):
+            is_group = True
+            group_id = str(target_id).replace("qgroup_", "")
+
         for comp in message_chain.chain:
             if isinstance(comp, Plain):
-                await self.client.send_text(target=target_id, text=comp.text)
+                if is_group and group_id:
+                    await self.client.send_group_text(qgroup_id=group_id, text=comp.text)
+                else:
+                    await self.client.send_text(target=target_id, text=comp.text)
+            elif isinstance(comp, Image):
+                img_path = await comp.convert_to_file_path()
+                if is_group and group_id:
+                    await self.client.send_group_image(qgroup_id=group_id, image=img_path)
+                else:
+                    await self.client.send_image(target=target_id, image=img_path)
             else:
                 text_val = getattr(comp, "text", str(comp))
                 if text_val:
-                    await self.client.send_text(target=target_id, text=text_val)
+                    if is_group and group_id:
+                        await self.client.send_group_text(qgroup_id=group_id, text=text_val)
+                    else:
+                        await self.client.send_text(target=target_id, text=text_val)
 
         if hasattr(super(), "send_by_session"):
             await super().send_by_session(session, message_chain)
+
+    async def change_status(self, status: int = 1):
+        """Change online status of the bot (1=Online, 2=Away, 3=Busy, 4=Offline)."""
+        await self.client.change_status(status=status)
 
     async def terminate(self):
         """Gracefully stop adapter."""

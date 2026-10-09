@@ -29,6 +29,16 @@ OP_HEARTBEAT: int = 0x03F8  # 1016: <X_HEARTBEAT> Keepalive
 OP_QUIT: int = 0x03F9  # 1017: <X_QUIT> Offline notification
 OP_READY: int = 0x03FA  # 1018: <X_READY> Handshake complete
 
+# QGroup Opcodes (3000-3012)
+OP_QGROUP_INVITE: int = 0x0BB8       # 3000: <X_QGROUP_INVITE>
+OP_QGROUP_INVITE_RSP: int = 0x0BB9   # 3001: <X_QGROUP_INVITE_RSP>
+OP_QGROUP_PUSH_INFO: int = 0x0BBA    # 3002: <X_QGROUP_PUSH_INFO>
+OP_QGROUP_PUSH_USER: int = 0x0BBB    # 3003: <X_QGROUP_PUSH_USER>
+OP_QGROUP_SEND_MSG: int = 0x0BBC     # 3004: <X_QGROUP_SEND_MSG>
+OP_QGROUP_DISMISS: int = 0x0BC0      # 3008: <X_QGROUP_DISMISS>
+OP_QGROUP_EXIT: int = 0x0BC1         # 3009: <X_QGROUP_EXIT>
+OP_QGROUP_KICK: int = 0x0BC2         # 3010: <X_QGROUP_KICK>
+
 # Discovery Magic
 DISCOVERY_PACKET_LEN: int = 304
 
@@ -275,3 +285,266 @@ def extract_chat_text(xml_text: str) -> Optional[Tuple[str, str, Dict[str, Any]]
         return msg_id, text, data
     except Exception:
         return None
+
+
+def build_send_image_xml(
+    img_md5: str,
+    token: int = 1001,
+    caption: str = "",
+    msg_id: Optional[str] = None,
+) -> Tuple[bytes, str]:
+    """Build authentic <X_SEND_MSG> XML containing an inline image with CFolderTranEngine token."""
+    if not msg_id:
+        msg_id = f"{int(time.time() * 1000):013d}_{random.randint(1000, 9999)}"
+    dt = [{"img": {"t": "feihu", "v": f"{token}|{img_md5}"}}]
+    if caption:
+        from .emoticons import emoji_to_nwt_text
+        safe_caption = emoji_to_nwt_text(caption)
+        dt.append({"txt": {"t": "normal", "v": safe_caption}})
+    json_body = {
+        "app": "shiyeline",
+        "dt": dt,
+        "ft": {
+            "b": "0",
+            "c": "0x000000",
+            "i": "0",
+            "n": "Microsoft YaHei",
+            "s": "9",
+            "u": "0",
+        },
+        "id": msg_id,
+        "type": "0",
+        "ver": "6.0",
+    }
+    json_str = json.dumps(json_body, ensure_ascii=False)
+    xml_str = (
+        '<?xml version="1.0" encoding="gb2312"?>\r\n'
+        '<X_SEND_MSG docver="1">\r\n'
+        f"\t<MSG_ID>{msg_id}</MSG_ID>\r\n"
+        f"\t<BODY>{json_str}</BODY>\r\n"
+        f"\t<TIME>{int(time.time())}</TIME>\r\n"
+        "</X_SEND_MSG>\r\n"
+    )
+    return xml_str.encode("gbk"), msg_id
+
+
+def build_qgroup_send_msg_xml(
+    qgroup_id: str,
+    content: str,
+    msg_id: Optional[str] = None,
+) -> Tuple[bytes, str]:
+    """Build authentic <X_QGROUP_SEND_MSG> XML payload for group chat."""
+    if not msg_id:
+        msg_id = f"{int(time.time() * 1000):013d}_{random.randint(1000, 9999)}"
+    from .emoticons import emoji_to_nwt_text
+    safe_content = emoji_to_nwt_text(content)
+    json_body = {
+        "app": "shiyeline",
+        "dt": [{"txt": {"t": "normal", "v": safe_content}}],
+        "ft": {
+            "b": "0",
+            "c": "0x000000",
+            "i": "0",
+            "n": "Microsoft YaHei",
+            "s": "9",
+            "u": "0",
+        },
+        "id": msg_id,
+        "type": "0",
+        "ver": "6.0",
+    }
+    json_str = json.dumps(json_body, ensure_ascii=False)
+    escaped = (
+        json_str.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+    xml_str = (
+        '<?xml version="1.0" encoding="gb2312"?>\r\n'
+        '<X_QGROUP_SEND_MSG docver="1">\r\n'
+        f"\t<QGROUP_ID>{qgroup_id}</QGROUP_ID>\r\n"
+        f"\t<MSG_ID>{msg_id}</MSG_ID>\r\n"
+        f"\t<MSG>{escaped}</MSG>\r\n"
+        f"\t<HIDE_RECORD>0</HIDE_RECORD>\r\n"
+        "</X_QGROUP_SEND_MSG>\r\n"
+    )
+    return xml_str.encode("gbk"), msg_id
+
+
+def build_qgroup_send_image_xml(
+    qgroup_id: str,
+    img_md5: str,
+    token: int = 1001,
+    caption: str = "",
+    msg_id: Optional[str] = None,
+) -> Tuple[bytes, str]:
+    """Build authentic <X_QGROUP_SEND_MSG> XML payload carrying an inline image."""
+    if not msg_id:
+        msg_id = f"{int(time.time() * 1000):013d}_{random.randint(1000, 9999)}"
+    dt = [{"img": {"t": "feihu", "v": f"{token}|{img_md5}"}}]
+    if caption:
+        from .emoticons import emoji_to_nwt_text
+        safe_caption = emoji_to_nwt_text(caption)
+        dt.append({"txt": {"t": "normal", "v": safe_caption}})
+    json_body = {
+        "app": "shiyeline",
+        "dt": dt,
+        "ft": {
+            "b": "0",
+            "c": "0x000000",
+            "i": "0",
+            "n": "Microsoft YaHei",
+            "s": "9",
+            "u": "0",
+        },
+        "id": msg_id,
+        "type": "0",
+        "ver": "6.0",
+    }
+    json_str = json.dumps(json_body, ensure_ascii=False)
+    escaped = (
+        json_str.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+    xml_str = (
+        '<?xml version="1.0" encoding="gb2312"?>\r\n'
+        '<X_QGROUP_SEND_MSG docver="1">\r\n'
+        f"\t<QGROUP_ID>{qgroup_id}</QGROUP_ID>\r\n"
+        f"\t<MSG_ID>{msg_id}</MSG_ID>\r\n"
+        f"\t<MSG>{escaped}</MSG>\r\n"
+        f"\t<HIDE_RECORD>0</HIDE_RECORD>\r\n"
+        "</X_QGROUP_SEND_MSG>\r\n"
+    )
+    return xml_str.encode("gbk"), msg_id
+
+
+def extract_qgroup_chat_text(xml_text: str) -> Optional[Tuple[str, str, str, Dict[str, Any]]]:
+    """Extract (qgroup_id, msg_id, plain_text, json_dict) from <X_QGROUP_SEND_MSG>."""
+    try:
+        qgroup_id_match = re.search(r"<QGROUP_ID>([^<]+)</QGROUP_ID>", xml_text)
+        qgroup_id = qgroup_id_match.group(1).strip() if qgroup_id_match else ""
+
+        msg_id_match = re.search(r"<MSG_ID>([^<]+)</MSG_ID>", xml_text)
+        msg_id = msg_id_match.group(1).strip() if msg_id_match else ""
+
+        body_match = re.search(r"<(?:BODY|MSG)>(.*?)</(?:BODY|MSG)>", xml_text, re.DOTALL)
+        if not body_match:
+            return None
+        body_str = body_match.group(1).strip()
+        try:
+            data = json.loads(body_str)
+        except Exception:
+            unescaped = (
+                body_str.replace("&quot;", '"')
+                .replace("&nbsp;", " ")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&apos;", "'")
+                .replace("&amp;", "&")
+            )
+            data = json.loads(unescaped)
+
+        if "dt" in data and isinstance(data["dt"], list):
+            from .emoticons import nwt_dt_to_emoji_text
+            text = nwt_dt_to_emoji_text(data["dt"])
+        else:
+            raw_text = data.get("c", "")
+            raw_text = (
+                raw_text.replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&quot;", '"')
+                .replace("&apos;", "'")
+                .replace("&amp;", "&")
+            )
+            from .emoticons import nwt_text_to_emoji
+            text = nwt_text_to_emoji(raw_text)
+
+        return qgroup_id, msg_id, text, data
+    except Exception:
+        return None
+
+
+# CFolderTranEngine (Mini-File / Inline Image Transmission)
+def build_folder_tran_response(
+    file_size: int,
+    token: int = 0,
+    offset: int = 0,
+    chunk_size: int = 16384,
+) -> bytes:
+    """Build authentic 108-byte CFolderTranEngine response packet (Command 2)."""
+    buf = bytearray(108)
+    struct.pack_into(">I", buf, 0, 108)
+    struct.pack_into(">I", buf, 4, 1)
+    struct.pack_into(">I", buf, 8, 2)
+    struct.pack_into(">Q", buf, 0x34, token)
+    struct.pack_into(">Q", buf, 0x3c, file_size)
+    struct.pack_into(">Q", buf, 0x44, chunk_size)
+    return bytes(buf)
+
+
+def build_folder_tran_chunk(
+    file_size: int,
+    offset: int,
+    chunk_data: bytes,
+    token: int = 0,
+) -> bytes:
+    """Build authentic CFolderTranEngine data chunk packet (Command 4)."""
+    chunk_len = len(chunk_data)
+    total_len = chunk_len + 100
+    buf = bytearray(total_len)
+    struct.pack_into(">I", buf, 0, total_len)
+    struct.pack_into(">I", buf, 4, 1)
+    struct.pack_into(">I", buf, 8, 4)
+    struct.pack_into(">Q", buf, 0x34, token)
+    struct.pack_into(">Q", buf, 0x3c, file_size)
+    struct.pack_into(">Q", buf, 0x44, offset)
+    struct.pack_into(">I", buf, 0x4c, chunk_len)
+    buf[0x64 : 0x64 + chunk_len] = chunk_data
+    return bytes(buf)
+
+
+def parse_folder_tran_packet(data: bytes) -> Optional[Dict[str, Any]]:
+    """Parse incoming CFolderTranEngine packet (Command 1, 2, 3, or 4)."""
+    if len(data) < 12:
+        return None
+    total_len = struct.unpack(">I", data[:4])[0]
+    p_type = struct.unpack(">I", data[4:8])[0]
+    p_cmd = struct.unpack(">I", data[8:12])[0]
+    res: Dict[str, Any] = {"total_len": total_len, "type": p_type, "cmd": p_cmd}
+
+    if p_cmd == 1 and len(data) >= 12:
+        if len(data) >= 0x3C:
+            tok = struct.unpack(">Q", data[0x34:0x3c])[0]
+            if tok != 0:
+                res["token"] = tok
+        m = re.search(rb'(\d+)\|([0-9a-fA-F]{32})', data)
+        if m:
+            res["token"] = int(m.group(1))
+            res["md5"] = m.group(2).decode("ascii").lower()
+        else:
+            m_v = re.search(rb'"v"\s*:\s*"([0-9a-fA-F]{32})"', data)
+            if m_v:
+                res["md5"] = m_v.group(1).decode("ascii").lower()
+
+    elif p_cmd == 2 and len(data) >= 0x4C:
+        res["token"] = struct.unpack(">Q", data[0x34:0x3c])[0]
+        res["file_size"] = struct.unpack(">Q", data[0x3c:0x44])[0]
+        res["chunk_size"] = struct.unpack(">Q", data[0x44:0x4c])[0]
+
+    elif p_cmd == 3 and len(data) >= 0x44:
+        res["token"] = struct.unpack(">Q", data[0x34:0x3c])[0]
+        res["offset"] = struct.unpack(">Q", data[0x3c:0x44])[0]
+        if len(data) >= 0x4C:
+            res["chunk_len"] = struct.unpack(">Q", data[0x44:0x4c])[0]
+
+    elif p_cmd == 4 and len(data) >= 0x64:
+        res["token"] = struct.unpack(">Q", data[0x34:0x3c])[0]
+        res["file_size"] = struct.unpack(">Q", data[0x3c:0x44])[0]
+        res["offset"] = struct.unpack(">Q", data[0x44:0x4c])[0]
+        chunk_len_32 = struct.unpack(">I", data[0x4c:0x50])[0]
+        res["chunk_len"] = chunk_len_32
+        res["chunk_data"] = data[0x64 : 0x64 + chunk_len_32]
+
+    return res
+

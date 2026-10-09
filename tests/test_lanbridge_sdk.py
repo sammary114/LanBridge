@@ -17,12 +17,19 @@ from lanbridge.protocol import (
     build_discovery_packet,
     build_flash_screen_xml,
     build_handshake_xml,
+    build_folder_tran_chunk,
+    build_folder_tran_response,
     build_msg_ack_xml,
+    build_qgroup_send_image_xml,
+    build_qgroup_send_msg_xml,
     build_recall_xml,
+    build_send_image_xml,
     build_send_msg_xml,
     build_typing_xml,
     extract_chat_text,
+    extract_qgroup_chat_text,
     parse_discovery_packet,
+    parse_folder_tran_packet,
 )
 
 
@@ -154,7 +161,58 @@ class TestLanBridgeSDK(unittest.TestCase):
         self.assertTrue(len(cfg.user_id) > 10)
         self.assertEqual(cfg.discovery_port, 9011)
         self.assertEqual(cfg.data_port, 9012)
+        self.assertEqual(cfg.image_port, 9013)
         self.assertEqual(cfg.username, "LanBridge-Bot")
+
+    def test_send_image_xml(self):
+        """Test building image XML containing feihu token and md5."""
+        xml_bytes, msg_id = build_send_image_xml("abcdef1234567890abcdef1234567890", token=12345, caption="图例说明")
+        xml_str = xml_bytes.decode("gbk")
+        self.assertIn("<X_SEND_MSG", xml_str)
+        self.assertIn("12345|abcdef1234567890abcdef1234567890", xml_str)
+        self.assertIn("图例说明", xml_str)
+
+    def test_qgroup_send_and_extract(self):
+        """Test QGroup text and image XML generation and extraction."""
+        # 1. Text message
+        xml_bytes, msg_id = build_qgroup_send_msg_xml("grp_123", "群成员测试消息")
+        xml_str = xml_bytes.decode("gbk")
+        self.assertIn("<X_QGROUP_SEND_MSG", xml_str)
+        self.assertIn("<QGROUP_ID>grp_123</QGROUP_ID>", xml_str)
+        qgroup_id, extracted_id, text, data = extract_qgroup_chat_text(xml_str)
+        self.assertEqual(qgroup_id, "grp_123")
+        self.assertEqual(extracted_id, msg_id)
+        self.assertEqual(text, "群成员测试消息")
+
+        # 2. Image message
+        img_bytes, img_msg_id = build_qgroup_send_image_xml("grp_123", "99887766554433221100aabbccddeeff", token=20000)
+        img_xml_str = img_bytes.decode("gbk")
+        qgroup_id2, extracted_id2, text2, data2 = extract_qgroup_chat_text(img_xml_str)
+        self.assertEqual(qgroup_id2, "grp_123")
+        self.assertIn("dt", data2)
+        self.assertEqual(data2["dt"][0]["img"]["v"], "20000|99887766554433221100aabbccddeeff")
+
+    def test_folder_tran_packets(self):
+        """Test CFolderTranEngine response, chunk and parser."""
+        # Response (Command 2)
+        rsp = build_folder_tran_response(file_size=65536, token=8888, chunk_size=16384)
+        self.assertEqual(len(rsp), 108)
+        parsed_rsp = parse_folder_tran_packet(rsp)
+        self.assertIsNotNone(parsed_rsp)
+        self.assertEqual(parsed_rsp["cmd"], 2)
+        self.assertEqual(parsed_rsp["token"], 8888)
+        self.assertEqual(parsed_rsp["file_size"], 65536)
+
+        # Chunk (Command 4)
+        sample_chunk = b"TEST-IMAGE-BINARY-CHUNK-DATA"
+        chunk_pkt = build_folder_tran_chunk(file_size=65536, offset=0, chunk_data=sample_chunk, token=8888)
+        self.assertEqual(len(chunk_pkt), 100 + len(sample_chunk))
+        parsed_chunk = parse_folder_tran_packet(chunk_pkt)
+        self.assertIsNotNone(parsed_chunk)
+        self.assertEqual(parsed_chunk["cmd"], 4)
+        self.assertEqual(parsed_chunk["token"], 8888)
+        self.assertEqual(parsed_chunk["offset"], 0)
+        self.assertEqual(parsed_chunk["chunk_data"], sample_chunk)
 
 
 if __name__ == "__main__":
