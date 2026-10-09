@@ -590,6 +590,7 @@
                 </div>
                 <div class="user-info">
                     <div class="user-name">{{ myInfo.nickname || 'LanBridge Client' }}</div>
+                    <div v-if="myInfo.signature" style="font-size:11px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;" :title="myInfo.signature">✍️ {{ myInfo.signature }}</div>
                     <div class="user-meta">{{ myInfo.local_ip }}:{{ myInfo.main_port }} [{{ myStatusText }}]</div>
                 </div>
             </div>
@@ -646,7 +647,7 @@
                         :key="g.qgroup_id"
                         class="list-item"
                         :class="{ active: currentChat && currentChat.type === 'group' && currentChat.id === g.qgroup_id }"
-                        @click="selectChat({ type: 'group', id: g.qgroup_id, name: g.name })"
+                        @click="selectChat({ type: 'group', id: g.qgroup_id, name: g.name, members: g.members })"
                     >
                         <div class="item-avatar group-avatar">群</div>
                         <div class="item-details">
@@ -690,9 +691,14 @@
             <div class="chat-header">
                 <div>
                     <div class="chat-title">{{ currentChat ? currentChat.name : '选择联系人或讨论组' }}</div>
-                    <div class="chat-subtitle">
-                        {{ currentChat ? (currentChat.type === 'peer' ? `IP: ${currentChat.ip}` : `讨论组 ID: ${currentChat.id}`) : '已就绪' }}
+                    <div class="chat-subtitle" v-if="currentChat">
+                        <span v-if="currentChat.type === 'peer'">IP: {{ currentChat.ip }}</span>
+                        <span v-else-if="currentChat.members && Object.keys(currentChat.members).length">
+                            群成员 ({{ Object.keys(currentChat.members).length }}人): {{ Object.values(currentChat.members).slice(0, 10).join('、') }}{{ Object.keys(currentChat.members).length > 10 ? ' 等...' : '' }}
+                        </span>
+                        <span v-else>讨论组 ID: {{ currentChat.id }}</span>
                     </div>
+                    <div class="chat-subtitle" v-else>已就绪</div>
                 </div>
                 <div class="header-actions">
                     <button
@@ -804,6 +810,7 @@
                 // 1. 本地状态
                 const myInfo = reactive({
                     nickname: 'LanBridge Client',
+                    signature: '',
                     local_ip: '127.0.0.1',
                     main_port: 9012,
                     status: 0,
@@ -888,6 +895,7 @@
                         const data = await res.json();
                         if (data.ok) {
                             myInfo.nickname = data.nickname || 'LanBridge Client';
+                            myInfo.signature = data.signature || '';
                             myInfo.local_ip = data.local_ip;
                             myInfo.main_port = data.main_port;
                             myInfo.status = data.status || 0;
@@ -1087,13 +1095,14 @@
                                 sync_subnets: true,
                                 sync_groups: true,
                                 sync_shares: true,
-                                apply_identity: false
+                                apply_identity: true
                             })
                         });
                         const data = await res.json();
                         if (data.ok && data.result.installed) {
                             const r = data.result;
-                            alert(`原生内网通数据同步成功！\n- 账号: ${r.account || '未配置'}\n- 讨论组: 导入 ${r.groups_imported} 个\n- 共享文件: 导入 ${r.shares_imported} 个\n- 网段扫描: 同步 ${r.subnets.length} 个网段`);
+                            alert(`原生内网通数据同步成功！\n- 账号/昵称: ${r.user_name || r.account || '未配置'}\n- 讨论组: 导入 ${r.groups_imported} 个\n- 共享文件: 导入 ${r.shares_imported} 个\n- 网段扫描: 同步 ${r.subnets.length} 个网段`);
+                            await fetchStatus();
                             await fetchGroups();
                             await fetchFiles();
                             await fetchContacts();

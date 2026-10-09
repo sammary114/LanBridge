@@ -374,7 +374,7 @@ class WebGateway:
         sync_subnets = data.get("sync_subnets", True)
         sync_groups = data.get("sync_groups", True)
         sync_shares = data.get("sync_shares", True)
-        apply_identity = data.get("apply_identity", False)
+        apply_identity = data.get("apply_identity", True)
 
         result = self.client.import_from_native(
             nwt_dir=nwt_dir,

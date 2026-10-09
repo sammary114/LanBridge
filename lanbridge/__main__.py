@@ -60,14 +60,17 @@ async def main_async() -> None:
     client = LanBridgeClient(**client_kwargs)
 
     if args.import_native or args.native_dir or args.adopt_identity:
+        should_adopt = args.adopt_identity or (args.nickname == "LanBridge-Bot")
         res = client.import_from_native(
             nwt_dir=args.native_dir,
-            apply_identity=args.adopt_identity,
+            apply_identity=should_adopt,
         )
         if res.get("installed"):
             logging.info(
-                "Imported from native Nwt (%s): %d groups, %d shares, %d subnets",
+                "Imported from native Nwt (%s): user='%s' (%s), %d groups, %d shares, %d subnets",
                 res.get("nwt_dir"),
+                client.nickname,
+                client.user_id,
                 res.get("groups_imported"),
                 res.get("shares_imported"),
                 len(res.get("subnets", [])),
