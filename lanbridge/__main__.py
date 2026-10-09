@@ -24,13 +24,13 @@ def setup_logging(verbose: bool = False) -> None:
     logging.basicConfig(level=level, format=fmt, datefmt=datefmt)
 
 
-async def main_async() -> None:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="lanbridge",
         description="LanBridge: Open-Source NeiWangTong (Nwt 3.4.3055) Autonomous Client & Gateway",
     )
     parser.add_argument("--host", default="127.0.0.1", help="Web gateway bind host (default: 127.0.0.1)")
-    parser.add_argument("--port", type=int, default=8080, help="Web gateway HTTP port (default: 8080)")
+    parser.add_argument("--port", "--web-port", type=int, default=8080, dest="port", help="Web gateway HTTP port (default: 8080)")
     parser.add_argument("--nickname", default="LanBridge-Bot", help="Local nickname")
     parser.add_argument("--user-id", default=None, help="Local user ID (hex MD5)")
     parser.add_argument("--broadcast", default=None, help="Subnet broadcast IP (e.g. 192.168.1.255)")
@@ -38,14 +38,19 @@ async def main_async() -> None:
     parser.add_argument("--native-dir", default=None, help="Path to native Nwt directory (default: C:\\Users\\Public\\Nwt)")
     parser.add_argument("--adopt-identity", action="store_true", help="Adopt native account UID, nickname, and signature")
     parser.add_argument("--no-web", action="store_true", help="Run in headless daemon mode without web gateway")
+    parser.add_argument("--web-only", action="store_true", help="Run only the Web Gateway without binding UDP/TCP protocol network ports")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose debug logging")
+    return parser
 
+
+async def main_async() -> None:
+    parser = build_parser()
     args = parser.parse_args()
     setup_logging(args.verbose)
 
     client_kwargs = {
         "nickname": args.nickname,
-        "auto_scan_on_start": True,
+        "auto_scan_on_start": not args.web_only,
     }
     if args.user_id:
         client_kwargs["user_id"] = args.user_id
@@ -68,16 +73,20 @@ async def main_async() -> None:
                 len(res.get("subnets", [])),
             )
 
-    await client.start()
+    if not args.web_only:
+        await client.start()
+    else:
+        logging.info("Running in Web-Only mode: UDP/TCP networking listeners skipped.")
 
     runner = None
     if not args.no_web:
         runner = await start_web_server(client, host=args.host, port=args.port)
+        mode_str = "Web-Only (No Protocol Ports)" if args.web_only else f"{client.local_ip}:{client.main_port}"
         print(f"\n=======================================================")
         print(f"  LanBridge Client & Web Gateway Ready!")
         print(f"  Web UI: http://{args.host}:{args.port}")
         print(f"  Node:   {client.nickname} ({client.user_id})")
-        print(f"  IP:     {client.local_ip}:{client.main_port}")
+        print(f"  Mode:   {mode_str}")
         print(f"=======================================================\n")
 
     try:

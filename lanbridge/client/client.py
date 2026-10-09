@@ -827,25 +827,34 @@ class LanBridgeClient:
                     for pkt in replies:
                         self.transport.sendto(pkt, addr)
 
-        sock_9011 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock_9011.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock_9011.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        sock_9011.bind((self.bind_ip, self.discovery_port))
-        t1, _ = await self._loop.create_datagram_endpoint(lambda: DiscoveryProtocol(self), sock=sock_9011)
-        self._udp_9011_transport = t1
+        try:
+            sock_9011 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock_9011.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock_9011.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            sock_9011.bind((self.bind_ip, self.discovery_port))
+            t1, _ = await self._loop.create_datagram_endpoint(lambda: DiscoveryProtocol(self), sock=sock_9011)
+            self._udp_9011_transport = t1
+        except Exception as e:
+            logger.warning("Could not bind UDP discovery port %d: %s", self.discovery_port, e)
 
-        sock_9012 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock_9012.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock_9012.bind((self.bind_ip, self.main_port))
-        t2, _ = await self._loop.create_datagram_endpoint(lambda: MainProtocol(self), sock=sock_9012)
-        self._udp_9012_transport = t2
+        try:
+            sock_9012 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock_9012.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock_9012.bind((self.bind_ip, self.main_port))
+            t2, _ = await self._loop.create_datagram_endpoint(lambda: MainProtocol(self), sock=sock_9012)
+            self._udp_9012_transport = t2
+        except Exception as e:
+            logger.warning("Could not bind UDP main port %d: %s", self.main_port, e)
 
         # 3. Start TCP Mini-File / FolderTran Server
-        self._tcp_server = await asyncio.start_server(
-            self._handle_tcp_client,
-            self.bind_ip,
-            self.tcp_file_port,
-        )
+        try:
+            self._tcp_server = await asyncio.start_server(
+                self._handle_tcp_client,
+                self.bind_ip,
+                self.tcp_file_port,
+            )
+        except Exception as e:
+            logger.warning("Could not bind TCP file port %d: %s", self.tcp_file_port, e)
 
         # 4. Start TCP 2442 File Share Server
         try:

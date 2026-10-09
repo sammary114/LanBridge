@@ -267,7 +267,7 @@ ip.addr == 47.57.13.180 && tcp.port == 80
 - **零配置自驱动接入引擎（Zero-Touch Autonomous Integration & Group Chat）全面交付**：
   * **网卡自适应与定向多广播**：`lanbridge.discovery.network` 自动枚举活动物理/虚拟网卡（剥离 loopback 和 APIPA 169.254.x），向所有活动子网定向广播和 `255.255.255.255` 并发宣告上线，双方用户均无需手动查询 IP 或配置网段。
   * **开机静默单播穿透扫描与主动唤醒**：客户端开机后台异步驱动 `SubnetScanner` 并发单播探测本地 `/24` 所在网段，收到反馈立即主动发起 ENet Opcode 0x82 握手与 profile 推送，在对端联系人树上无感点亮在线绿标。
-- **自动化测试套件**：全量 **117 项自动化测试**（117/117 PASS），涵盖传输层、密码机、协议握手、文件引擎、群文件共享、跨网段探测、QGroup全套生命周期管理、Web 网关、Vue 3 离线单页客户端与原生内网通目录数据适配。
+- **自动化测试套件**：全量 **120 项自动化测试**（120/120 PASS），涵盖传输层、密码机、协议握手、文件引擎、群文件共享、跨网段探测、QGroup全套生命周期管理、Web 网关、Vue 3 离线单页客户端、CLI 增强与原生内网通目录数据适配。
 - **M6 里程碑全面交付（全功能闭环与 Web 客户端/Bot 网关）**：
   * **多人讨论组/群聊全套生命周期管理**：完整逆向还原并实现原生 13 项群组命令字（建群、入群应答、群资料/公告推送、群成员变动、拉取成员、踢人、解散、退群）；
   * **聊天增强与状态机制**：实现原生输入中指示 `X_SEND_WRITTING`（Opcode 1008）、消息撤回机制 `recall`（原生 JSON type 6）、个人在线状态切换与个性签名广播；
@@ -278,5 +278,5 @@ ip.addr == 47.57.13.180 && tcp.port == 80
   * **配置与跨网段目标继承**：自动提取 `data/acc`（原生 UID）、`cache/cfg/Option.xml`（`CorpId`、用户名、个性签名）与 `cache/cfg/Network.xml`（`OtherSubnetIp` 自动升规为标准 `/24` 并入开机主动探测池）；
   * **讨论组与共享空间无感导入**：只读提取 `data/qrp`（SQLite `QGroupInfo_*` 与 `QGroupUser_*`，原生支持真实 Emoji 与 18+ 名成员映射）及 `cache/db/sd`（`ShareData_*` 共享元数据）；
   * **媒体缓存秒级命中与直接伺服**：复用 `cache/pic/`（356+ 张历史图片）与 `cache/recv/`，实现 Web UI 与 TCP `CFolderTranEngine` 图片秒开秒传（零网络开销）；
-  * **全场景一键同步**：Web 端顶栏增加“同步原生内网通”与 `GET /api/native/status`、`POST /api/native/import`、`GET /api/images/{md5}`；CLI 增加 `--import-native`、`--native-dir` 与 `--adopt-identity` 启动选项。
+  * **全场景一键同步**：Web 端顶栏增加“同步原生内网通”与 `GET /api/native/status`、`POST /api/native/import`、`GET /api/images/{md5}`；CLI 增加 `--web-port`、`--web-only`（脱离底层端口冲突）、`--import-native`、`--native-dir` 与 `--adopt-identity` 启动选项。
 
