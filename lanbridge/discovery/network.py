@@ -42,6 +42,20 @@ class NetworkInterfaceInfo:
         return ipaddress.ip_address(self.ip).is_link_local
 
 
+def _probe_outbound_ip() -> Optional[str]:
+    """Determine outbound IP by connecting a UDP socket without transmitting packets."""
+    for target in ("223.5.5.5", "114.114.114.114", "8.8.8.8"):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect((target, 80))
+                candidate = s.getsockname()[0]
+                if candidate and not candidate.startswith("127."):
+                    return candidate
+        except Exception:
+            continue
+    return None
+
+
 def get_active_network_interfaces() -> List[NetworkInterfaceInfo]:
     """Discover all active non-loopback IPv4 interfaces and their subnet details."""
     interfaces: List[NetworkInterfaceInfo] = []
@@ -71,7 +85,7 @@ def get_active_network_interfaces() -> List[NetworkInterfaceInfo]:
                         logger.debug("Skipping interface %s (%s): %s", name, a.address, e)
         if interfaces:
             return interfaces
-    except ImportError:
+    except (ImportError, Exception):
         logger.debug("psutil not available, falling back to standard socket discovery")
 
     # Method B: Fallback to socket hostname resolution
@@ -98,6 +112,25 @@ def get_active_network_interfaces() -> List[NetworkInterfaceInfo]:
     except Exception as e:
         logger.warning("Failed standard socket hostname resolution: %s", e)
 
+    # Method C: Outbound route probing (especially effective on Android / Termux / Linux)
+    if not interfaces:
+        outbound = _probe_outbound_ip()
+        if outbound:
+            try:
+                mask = "255.255.255.0"
+                iface_obj = ipaddress.IPv4Interface(f"{outbound}/{mask}")
+                interfaces.append(
+                    NetworkInterfaceInfo(
+                        name="wlan0",
+                        ip=outbound,
+                        netmask=mask,
+                        network=str(iface_obj.network),
+                        broadcast=str(iface_obj.network.broadcast_address),
+                    )
+                )
+            except Exception as e:
+                logger.debug("Skipping synthetic interface: %s", e)
+
     return interfaces
 
 
@@ -113,17 +146,10 @@ def get_default_broadcast_addresses() -> List[str]:
 
 def get_primary_local_ip() -> str:
     """Determine the primary local IPv4 address used for outbound communication."""
-    # Try routing lookup via dummy UDP connect (does not transmit packets)
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("223.5.5.5", 80))
-            candidate = s.getsockname()[0]
-            if candidate and not candidate.startswith("127."):
-                return candidate
-    except Exception:
-        pass
+    candidate = _probe_outbound_ip()
+    if candidate:
+        return candidate
 
-    # Fallback to the first discovered active interface
     active = get_active_network_interfaces()
     if active:
         return active[0].ip
