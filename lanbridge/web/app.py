@@ -34,6 +34,7 @@ from lanbridge.models import (
     GroupSharedFile,
     QGroup,
     RecallNotice,
+    ShakeNotice,
     TypingNotice,
 )
 
@@ -69,6 +70,7 @@ class WebGateway:
         self.app.router.add_post("/api/status", self.handle_post_status)
         self.app.router.add_post("/api/share_file", self.handle_post_share_file)
         self.app.router.add_post("/api/scan", self.handle_post_scan)
+        self.app.router.add_post("/api/shake", self.handle_post_shake)
 
         static_dir = os.path.join(os.path.dirname(__file__), "static")
         if os.path.isdir(static_dir):
@@ -79,6 +81,7 @@ class WebGateway:
         self.client.on_group_message(self._on_group_message)
         self.client.on_contact_online(self._on_contact_online)
         self.client.on_typing(self._on_typing)
+        self.client.on_shake(self._on_shake)
         self.client.on_message_recall(self._on_message_recall)
         self.client.on_qgroup_invite(self._on_qgroup_invite)
         self.client.on_qgroup_member_change(self._on_qgroup_member_change)
@@ -156,6 +159,21 @@ class WebGateway:
                     "peer_ip": tn.peer_ip,
                     "is_typing": tn.is_typing,
                     "timestamp": tn.timestamp,
+                },
+            )
+        )
+
+    def _on_shake(self, sn: ShakeNotice) -> None:
+        contact = self.client.contacts.get(sn.sender_id)
+        sender_name = contact.nickname if contact else sn.sender_id
+        asyncio.create_task(
+            self.broadcast_ws(
+                "window_shake",
+                {
+                    "sender_id": sn.sender_id,
+                    "sender_name": sender_name,
+                    "peer_ip": sn.peer_ip,
+                    "timestamp": sn.timestamp,
                 },
             )
         )
@@ -256,6 +274,10 @@ class WebGateway:
                             txt = data.get("text", "")
                             if gid and txt:
                                 await self.client.send_group_message(gid, txt)
+                        elif action == "shake":
+                            tip = data.get("target_ip")
+                            if tip:
+                                await self.client.shake_window(tip)
                     except Exception as e:
                         logger.warning("Error processing ws payload: %s", e)
                 elif msg.type == WSMsgType.ERROR:
@@ -532,6 +554,21 @@ class WebGateway:
                 for c in discovered
             ],
         })
+
+    async def handle_post_shake(self, request: web.Request) -> web.Response:
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        target_ip = data.get("target_ip") or data.get("peer_ip")
+        if not target_ip:
+            user_id = data.get("user_id")
+            if user_id and user_id in self.client.contacts:
+                target_ip = self.client.contacts[user_id].ip
+        if not target_ip:
+            return web.json_response({"ok": False, "error": "Missing target_ip"}, status=400)
+        await self.client.shake_window(target_ip)
+        return web.json_response({"ok": True})
 
 
 def create_app(client: LanBridgeClient) -> web.Application:

@@ -129,3 +129,12 @@ class RecallNotice:
     qgroup_id: Optional[str] = None
 
 
+@dataclass
+class ShakeNotice:
+    """Represents an incoming window shake notice."""
+
+    sender_id: str
+    peer_ip: str
+    timestamp: float = 0.0
+
+

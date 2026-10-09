@@ -767,6 +767,30 @@
             gap: 10px;
             margin-top: 8px;
         }
+
+        @keyframes window-shake {
+            0%, 100% { transform: translate(0, 0) rotate(0deg); }
+            10%, 30%, 50%, 70%, 90% { transform: translate(-6px, 4px) rotate(-0.5deg); }
+            20%, 40%, 60%, 80% { transform: translate(6px, -4px) rotate(0.5deg); }
+        }
+
+        .anim-shake {
+            animation: window-shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+        }
+
+        .shake-notice {
+            align-self: center;
+            font-size: 12px;
+            color: #f59e0b;
+            background-color: rgba(245, 158, 11, 0.12);
+            border: 1px solid rgba(245, 158, 11, 0.25);
+            border-radius: 14px;
+            padding: 4px 14px;
+            margin: 8px 0;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
     </style>
     <!-- 本地生产版 Vue 3 核心引擎 (100% 局域网脱机离线可用) -->
     <script src="/static/vue.global.prod.js"></script>
@@ -915,12 +939,15 @@
 
             <!-- 聊天主视口与右侧成员面板 -->
             <div class="chat-body-layout">
-                <div class="chat-main-column">
+                <div class="chat-main-column" :class="{ 'anim-shake': isShaking }">
                     <!-- 消息历史流 -->
                     <div class="messages-container" ref="messagesContainerRef">
                         <template v-for="m in currentMessages" :key="m.msg_id">
                             <div v-if="m.recalled" class="recalled-notice">
                                 {{ m.is_self ? '你' : '对方' }} 撤回了一条消息
+                            </div>
+                            <div v-else-if="m.is_shake" class="shake-notice">
+                                {{ m.text }}
                             </div>
                             <div v-else class="message" :class="m.is_self ? 'self' : 'peer'">
                                 <div v-if="!m.is_self && currentChat && currentChat.type === 'group'" class="sender-tag">
@@ -966,7 +993,7 @@
                     <!-- 输入区域 -->
                     <div class="input-bar">
                         <div class="input-tools">
-                            <button class="tool-btn" :disabled="!currentChat" @click="sendShake">窗口抖动</button>
+                            <button class="tool-btn" :disabled="!currentChat || currentChat.type !== 'peer'" @click="sendShake" title="向对方发送窗口抖动">窗口抖动</button>
                             <button class="tool-btn" :disabled="!currentChat || currentChat.type !== 'group'" @click="triggerFileShare">群共享文件</button>
                         </div>
                         <div class="input-row">
@@ -1095,11 +1122,19 @@
                 const showCreateGroupModal = ref(false);
                 const newGroup = reactive({ name: '', announcement: '' });
                 const messagesContainerRef = ref(null);
+                const isShaking = ref(false);
 
                 let ws = null;
                 let typingTimeout = null;
                 let isTyping = false;
                 let stopTypingTimer = null;
+
+                const triggerShakeEffect = () => {
+                    isShaking.value = true;
+                    setTimeout(() => {
+                        isShaking.value = false;
+                    }, 600);
+                };
 
                 // 2. 计算属性
                 const myStatusText = computed(() => myInfo.status === 0 ? '在线' : '离开');
@@ -1129,7 +1164,11 @@
                     const chat = currentChat.value;
                     return messages.value.filter(m => {
                         if (chat.type === 'peer') {
-                            return m.type === 'peer' && (m.sender_id === chat.id || m.recipient_id === chat.id);
+                            return m.type === 'peer' && (
+                                m.sender_id === chat.id ||
+                                m.recipient_id === chat.id ||
+                                (chat.ip && m.peer_ip === chat.ip)
+                            );
                         } else {
                             return m.type === 'group' && m.qgroup_id === chat.id;
                         }
@@ -1363,11 +1402,34 @@
 
                 const sendShake = async () => {
                     if (!currentChat.value || currentChat.value.type !== 'peer') return;
+                    const chat = currentChat.value;
+                    const targetIp = chat.ip;
+                    const targetId = chat.id;
+                    const targetName = chat.name || chat.id;
+
+                    // 自身触发震动动效
+                    triggerShakeEffect();
+
+                    // 向聊天记录中推入自身抖动提示
+                    const msgId = Date.now();
+                    messages.value.push({
+                        msg_id: msgId,
+                        type: 'peer',
+                        sender_id: 'me',
+                        recipient_id: targetId,
+                        peer_ip: targetIp,
+                        is_shake: true,
+                        text: `🔔 你向 ${targetName} 发送了一个窗口抖动`,
+                        timestamp: Date.now() / 1000,
+                        is_self: true,
+                    });
+                    scrollToBottom();
+
                     try {
-                        await fetch('/api/typing', {
+                        await fetch('/api/shake', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ peer_ip: currentChat.value.ip, typing: true })
+                            body: JSON.stringify({ target_ip: targetIp, user_id: targetId })
                         });
                     } catch (e) {
                         console.error('Failed sending shake', e);
@@ -1561,6 +1623,21 @@
                         }
                     } else if (['group_invite', 'group_member_change', 'group_dismiss'].includes(type)) {
                         fetchGroups();
+                    } else if (type === 'window_shake') {
+                        triggerShakeEffect();
+                        const senderName = d.sender_name || d.sender_id || '对方';
+                        messages.value.push({
+                            msg_id: Date.now(),
+                            type: 'peer',
+                            sender_id: d.sender_id,
+                            recipient_id: myInfo.user_id,
+                            peer_ip: d.peer_ip,
+                            is_shake: true,
+                            text: `🔔 ${senderName} 向你发送了一个窗口抖动！`,
+                            timestamp: d.timestamp || (Date.now() / 1000),
+                            is_self: false,
+                        });
+                        scrollToBottom();
                     } else if (type === 'group_file_shared') {
                         fetchFiles();
                     }
@@ -1588,6 +1665,7 @@
                     showCreateGroupModal,
                     newGroup,
                     messagesContainerRef,
+                    isShaking,
                     myStatusText,
                     myStatusClass,
                     filteredContacts,

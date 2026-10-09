@@ -172,6 +172,39 @@ class TestWebGateway(AioHTTPTestCase):
         self.assertIn("count", data)
         self.assertIn("contacts", data)
 
+    @unittest_run_loop
+    async def test_shake_endpoint(self):
+        """Test POST /api/shake endpoint and validation."""
+        # 1. Missing target_ip
+        resp_bad = await self.client.post("/api/shake", json={})
+        self.assertEqual(resp_bad.status, 400)
+
+        # 2. Valid target_ip
+        resp_ok = await self.client.post("/api/shake", json={"target_ip": "127.0.0.1"})
+        self.assertEqual(resp_ok.status, 200)
+        data = await resp_ok.json()
+        self.assertTrue(data["ok"])
+
+        # 3. Fallback to user_id in contacts
+        resp_uid = await self.client.post("/api/shake", json={"user_id": "contact_bob"})
+        self.assertEqual(resp_uid.status, 200)
+        data_uid = await resp_uid.json()
+        self.assertTrue(data_uid["ok"])
+
+    @unittest_run_loop
+    async def test_shake_websocket_broadcast(self):
+        """Test window_shake WebSocket broadcast."""
+        from lanbridge.models import ShakeNotice
+        ws = await self.client.ws_connect("/ws")
+        sn = ShakeNotice(sender_id="contact_bob", peer_ip="127.0.0.1", timestamp=123456.78)
+        self.client_node.emit_shake(sn)
+        msg = await ws.receive_json()
+        self.assertEqual(msg.get("event"), "window_shake")
+        data = msg.get("data", {})
+        self.assertEqual(data.get("sender_id"), "contact_bob")
+        self.assertEqual(data.get("sender_name"), "Bob")
+        self.assertEqual(data.get("peer_ip"), "127.0.0.1")
+        await ws.close()
 
 
 if __name__ == "__main__":

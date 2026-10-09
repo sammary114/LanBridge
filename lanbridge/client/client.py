@@ -36,6 +36,7 @@ from lanbridge.models import (
     GroupSharedFile,
     QGroup,
     RecallNotice,
+    ShakeNotice,
     TypingNotice,
 )
 from lanbridge.protocol import (
@@ -194,6 +195,7 @@ class LanBridgeClient:
         self._on_qgroup_dismiss_handlers: List[Callable[[str], None]] = []
         self._on_typing_handlers: List[Callable[[TypingNotice], None]] = []
         self._on_message_recall_handlers: List[Callable[[RecallNotice], None]] = []
+        self._on_shake_handlers: List[Callable[[ShakeNotice], None]] = []
 
         self._running = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -253,6 +255,11 @@ class LanBridgeClient:
         self._on_message_recall_handlers.append(handler)
         return handler
 
+    def on_shake(self, handler: Callable[[ShakeNotice], None]) -> Callable[[ShakeNotice], None]:
+        """Register a callback when receiving a window shake notice."""
+        self._on_shake_handlers.append(handler)
+        return handler
+
     def emit_group_file_shared(self, shared_file: GroupSharedFile) -> None:
         for handler in self._on_group_file_shared_handlers:
             try:
@@ -294,6 +301,13 @@ class LanBridgeClient:
                 handler(rn)
             except Exception as e:
                 logger.error("Error in on_message_recall handler: %s", e)
+
+    def emit_shake(self, sn: ShakeNotice) -> None:
+        for handler in self._on_shake_handlers:
+            try:
+                handler(sn)
+            except Exception as e:
+                logger.error("Error in on_shake handler: %s", e)
 
 
     def get_session(self, peer_ip: str) -> ENetProtocolSession:
@@ -568,6 +582,21 @@ class LanBridgeClient:
                 timestamp=time.time(),
             )
             self.emit_typing(tn)
+
+        # Opcode 1007 (0x03EF): X_SEND_FLASH_SCREEN (Window Shake)
+        elif opcode == Opcode.X_SEND_FLASH_SCREEN or "<X_SEND_FLASH_SCREEN" in xml_str:
+            sender_uid = "unknown"
+            for uid, c in self.contacts.items():
+                if c.ip == peer_ip:
+                    sender_uid = uid
+                    break
+            sn = ShakeNotice(
+                sender_id=sender_uid,
+                peer_ip=peer_ip,
+                timestamp=time.time(),
+            )
+            logger.info("Received window shake from %s (%s)", peer_ip, sender_uid)
+            self.emit_shake(sn)
 
         # Opcode 1001 (0x03E9): X_CHANGE_STATUS
         elif opcode == Opcode.X_CHANGE_STATUS or "<X_CHANGE_STATUS" in xml_str:

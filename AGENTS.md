@@ -267,7 +267,7 @@ ip.addr == 47.57.13.180 && tcp.port == 80
 - **零配置自驱动接入引擎（Zero-Touch Autonomous Integration & Group Chat）全面交付**：
   * **网卡自适应与定向多广播**：`lanbridge.discovery.network` 自动枚举活动物理/虚拟网卡（剥离 loopback 和 APIPA 169.254.x），向所有活动子网定向广播和 `255.255.255.255` 并发宣告上线，双方用户均无需手动查询 IP 或配置网段。
   * **开机静默单播穿透扫描与主动唤醒**：客户端开机后台异步驱动 `SubnetScanner` 并发单播探测本地 `/24` 所在网段，收到反馈立即主动发起 ENet Opcode 0x82 握手与 profile 推送，在对端联系人树上无感点亮在线绿标。
-- **自动化测试套件**：全量 **121 项自动化测试**（121/121 PASS），涵盖传输层、密码机、协议握手、文件引擎、群文件共享、跨网段主动探测、QGroup全套生命周期管理、Web 网关、Vue 3 离线单页客户端、CLI 增强、原生内网通目录数据适配与在线主动扫描。
+- **自动化测试套件**：全量 **124 项自动化测试**（124/124 PASS），涵盖传输层、密码机、协议握手、文件引擎、群文件共享、跨网段主动探测、QGroup全套生命周期管理、Web 网关、Vue 3 离线单页客户端、CLI 增强、原生内网通目录数据适配、在线主动扫描以及原生窗口抖动（Flash Screen）。
 - **M6 里程碑全面交付（全功能闭环与 Web 客户端/Bot 网关）**：
   * **多人讨论组/群聊全套生命周期管理**：完整逆向还原并实现原生 13 项群组命令字（建群、入群应答、群资料/公告推送、群成员变动、拉取成员、踢人、解散、退群）；
   * **聊天增强与状态机制**：实现原生输入中指示 `X_SEND_WRITTING`（Opcode 1008）、消息撤回机制 `recall`（原生 JSON type 6）、个人在线状态切换与个性签名广播；
@@ -284,4 +284,9 @@ ip.addr == 47.57.13.180 && tcp.port == 80
   * **生命周期同步与快速脉冲扫描**：采用 `asyncio.Event` 严格同步发送与监听器生命周期，支持 Linger 保活窗口与分批微休眠让渡，0.4 秒内平滑完成 760+ 跨网段并发探测；
   * **讨论组成员与联系人双向智能映射**：发现探测节点后自动反查 `self.qgroups` 真实姓名（如自动将 UID 关联为 `VV`、`H4C`、`LQ-New`、`DD2号`），并自动向在线对端触发 ENet Opcode 0x82 建立连接；
   * **Web 端全链路主动扫描与自驱动刷新**：实现 `POST /api/scan` REST 端点与 WebSocket 增量广播；Web UI 群成员面板新增“🔄 扫描在线”按钮，且在切换至讨论组时自动触发背景探测，实时点亮绿色在线徽标与真实 IP。
+- **M9 原生双向窗口抖动（Native Flash Screen / Window Shake）全面交付**：
+  * **原生逆向反汇编与协议定型**：逆向反汇编 `ShiYeLine.exe`（偏移 `0x9eaa60`、`0x431d62`），确认窗口震荡信令格式为 `<X_SEND_FLASH_SCREEN docver="1"><TYPE>0</TYPE></X_SEND_FLASH_SCREEN>`，操作码为 `Opcode.X_SEND_FLASH_SCREEN`（0x03EF / 1007），经 XTEA 加密封包；
+  * **底层 SDK 双向收发支持**：新增 `ShakeNotice` 数据模型，`LanBridgeClient` 实现 `shake_window(target_ip)` 与 `on_shake` / `emit_shake` 事件闭环，解包 0x03EF 自动匹配对端身份与 IP；
+  * **Web 接口与 WebSocket 双向实时流**：Web Gateway 新增 `POST /api/shake` REST 端点（支持 IP 与 user_id 双模式解析）、WebSocket `window_shake` 实时广播以及客户端向网关发送 `action="shake"` 支持；
+  * **现代化交互与逼真动效呈现**：Web UI 修复工具栏“窗口抖动”按钮私聊可用性限制，注入 `@keyframes window-shake` CSS 动效类（`.anim-shake`），收发抖动时均触发视口震颤动效并在聊天时间轴上以高亮徽标流式呈现 `🔔 你向 [对方] 发送了一个窗口抖动` 与 `🔔 [对方] 向你发送了一个窗口抖动！`。
 

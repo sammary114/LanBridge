@@ -176,6 +176,25 @@ class TestLanBridgeSDK(unittest.TestCase):
         self.assertIn("192.168.1.2", hosts)
         self.assertIn("10.0.0.1", hosts)
 
+    def test_window_shake_envelope_and_handler(self) -> None:
+        from lanbridge import ShakeNotice
+        client = LanBridgeClient(user_id="bot_user_id_11111111111111111")
+        shakes = []
+
+        @client.on_shake
+        def handle_shake(sn: ShakeNotice) -> None:
+            shakes.append(sn)
+
+        env = build_x_flash_screen_envelope(shake_type=0)
+        self.assertTrue(len(env) > 16)
+
+        xtea = XteaEngine()
+        opcode, plaintext = xtea.parse_envelope(env)
+        replies = []
+        client._process_inner_envelope(opcode, plaintext, "192.168.1.100", replies)
+        self.assertEqual(len(shakes), 1)
+        self.assertEqual(shakes[0].peer_ip, "192.168.1.100")
+
 
 if __name__ == "__main__":
     unittest.main()

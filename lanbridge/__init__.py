@@ -15,6 +15,7 @@ from lanbridge.models import (
     QGroup,
     RecallNotice,
     TypingNotice,
+    ShakeNotice,
 )
 from lanbridge.protocol import (
     AesEngine,
@@ -59,6 +60,7 @@ __all__ = [
     "QGroup",
     "TypingNotice",
     "RecallNotice",
+    "ShakeNotice",
     "XteaEngine",
     "BlowfishEngine",
     "AesEngine",
