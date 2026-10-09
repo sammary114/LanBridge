@@ -133,6 +133,56 @@ class TestDeviceIdentityAndGrouping(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(args.corp_id, "99887766554433221100aabbccddeeff")
         self.assertEqual(args.signature, "在线测试中")
 
+    def test_x_send_msg_replies_80byte_opcode_86_ack(self):
+        client = LanBridgeClient(auto_scan_on_start=False)
+        sess = client.get_session("192.168.1.50")
+        sess.connected = True
+        sess.peer_id = 0x0123
+        sess.session_id = 0
+
+        # Construct an authentic X_SEND_MSG packet
+        from lanbridge.protocol.messages import build_x_send_msg_envelope
+        from lanbridge.protocol.crypto import XteaEngine
+        env = build_x_send_msg_envelope("test message", msg_id=1)
+        # Wrap into 0x86 packet for simulation
+        raw_pkt = sess.build_reliable(0, env)
+
+        replies = client.handle_main_udp_packet(raw_pkt, ("192.168.1.50", 9012))
+        # Expect 2 replies: 1 ENet ACK for 0x86, and 1 X_SEND_MSG_ACK (80 bytes, Opcode 0x86)
+        self.assertTrue(len(replies) >= 2)
+        ack_pkt = replies[-1]
+        self.assertEqual(len(ack_pkt), 80)
+        self.assertEqual(ack_pkt[4], 0x86)  # Opcode 0x86 (SendReliable)
+        xtea = XteaEngine()
+        op, dec = xtea.parse_envelope(ack_pkt[10:])
+        self.assertEqual(op, 0x03ED)  # Opcode.X_SEND_MSG_ACK
+        self.assertIn("<MSG_ID>1</MSG_ID>", dec.decode("utf-8"))
+
+    async def test_send_message_dynamic_seq_and_msg_id(self):
+        client = LanBridgeClient(auto_scan_on_start=False)
+        sess = client.get_session("192.168.1.50")
+        sess.connected = True
+        sess.peer_id = 0x0123
+        sess.session_id = 0
+
+        client._udp_9012_transport = MagicMock()
+
+        # Send first message
+        await client.send_message("192.168.1.50", "msg 1")
+        calls = client._udp_9012_transport.sendto.call_args_list
+        self.assertTrue(len(calls) > 0)
+        pkt1 = calls[0][0][0]
+        sub_id1 = int.from_bytes(pkt1[6:8], "big")
+
+        # Send second message
+        await client.send_message("192.168.1.50", "msg 2")
+        calls2 = client._udp_9012_transport.sendto.call_args_list
+        pkt2 = calls2[-1][0][0]
+        sub_id2 = int.from_bytes(pkt2[6:8], "big")
+
+        # Verify outgoing_seq advanced and is not hardcoded
+        self.assertGreater(sub_id2, sub_id1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -100,10 +100,10 @@ class ENetProtocolSession:
         frag_count = len(chunks)
         start_seq = self.outgoing_seq
         packets = []
+        hdr = self.get_header(has_sent_time=True)
 
         for i, chunk in enumerate(chunks):
             offset = i * max_chunk
-            hdr = self.get_header(has_sent_time=True)
             cmd = struct.pack(">BBH", ENetCommandType.SEND_FRAGMENT | FLAG_ACKNOWLEDGE, channel, self.outgoing_seq)
             frag_hdr = struct.pack(">HHIIII", start_seq, len(chunk), frag_count, i, total_len, offset)
             packets.append(hdr + cmd + frag_hdr + chunk)

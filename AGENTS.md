@@ -267,7 +267,7 @@ ip.addr == 47.57.13.180 && tcp.port == 80
 - **零配置自驱动接入引擎（Zero-Touch Autonomous Integration & Group Chat）全面交付**：
   * **网卡自适应与定向多广播**：`lanbridge.discovery.network` 自动枚举活动物理/虚拟网卡（剥离 loopback 和 APIPA 169.254.x），向所有活动子网定向广播和 `255.255.255.255` 并发宣告上线，双方用户均无需手动查询 IP 或配置网段。
   * **开机静默单播穿透扫描与主动唤醒**：客户端开机后台异步驱动 `SubnetScanner` 并发单播探测本地 `/24` 所在网段，收到反馈立即主动发起 ENet Opcode 0x82 握手与 profile 推送，在对端联系人树上无感点亮在线绿标。
-- **自动化测试套件**：全量 **133 项自动化测试**（133/133 PASS），涵盖传输层、密码机、协议握手、文件引擎、群文件共享、跨网段主动探测、QGroup全套生命周期管理、Web 网关、Vue 3 离线单页客户端、CLI 增强、原生内网通目录数据适配、在线主动扫描、原生窗口抖动（Flash Screen）、设备唯一持久化 UID 生成与 UDP 2425 IPMSG 原生 `@shiyeline:` 抑制标记。
+- **自动化测试套件**：全量 **135 项自动化测试**（135/135 PASS），涵盖传输层、密码机、协议握手、文件引擎、群文件共享、跨网段主动探测、QGroup全套生命周期管理、Web 网关、Vue 3 离线单页客户端、CLI 增强、原生内网通目录数据适配、在线主动扫描、原生窗口抖动（Flash Screen）、设备唯一持久化 UID 生成、UDP 2425 IPMSG 原生 `@shiyeline:` 抑制标记、80 字节 Opcode 0x86 消息回执（X_SEND_MSG_ACK）与 ENet 动态会话分片收发。
 - **M6 里程碑全面交付（全功能闭环与 Web 客户端/Bot 网关）**：
   * **多人讨论组/群聊全套生命周期管理**：完整逆向还原并实现原生 13 项群组命令字（建群、入群应答、群资料/公告推送、群成员变动、拉取成员、踢人、解散、退群）；
   * **聊天增强与状态机制**：实现原生输入中指示 `X_SEND_WRITTING`（Opcode 1008）、消息撤回机制 `recall`（原生 JSON type 6）、个人在线状态切换与个性签名广播；
@@ -297,4 +297,8 @@ ip.addr == 47.57.13.180 && tcp.port == 80
   * **UDP 2425 原生 `@shiyeline:` 抑制与 32 位 UID 完整报文**：将 UDP 2425 广播与单播强制升级为带有 `1@shiyeline:` 标记与 32 字节 UID 的格式（`1@shiyeline:{seq}:{user}:{host}:1:{nick}\0{group}\0{user_id}\0`），原生内网通内核（`0x005b316d`）识别后抑制创建旧版飞鸽传书（小鸟头像），彻底根除了 PC 端向其发消息时因缺少 UID 触发 0xC0000005 非法内存访问闪退；
   * **跨设备/安卓端唯一持久化 UID**：新增 `get_or_create_device_id()`，跨平台将每个设备生成的 32 字符 Hex UID 持久化在 `~/.lanbridge/device_id`。彻底解决 Termux/多设备共用硬编码宿主机 UID 导致原生 9011 判定为“自环广播”而静默丢包的冲突难题；
   * **未分组联系人与组织单位原生规范**：将默认分组名从“内网通联系人”规范化为内网通未加入单位时的原生默认名称“未分组联系人”；CLI 增加 `--group`（支持自定义单位名称）、`--corp-id` 与 `--signature` 参数，并在 Profile XML 中原生注入 `<GROUP>`。
+- **M12 Opcode 0x86 消息回执对齐、ENet 动态序列号与文本双向收发闭环 全面交付**：
+  * **80 字节 Opcode 0x86 消息确认帧闭环**：收到 `X_SEND_MSG` 时改用 `session.build_reliable(0, ack_env)` 发送标准 80 字节 Opcode 0x86 回执包（彻底根治原生客户端界面弹出“可能由于网络原因，消息未能成功”的误报提示）；
+  * **ENet 动态序列号与单调自增 `msg_id`**：发消息时废除固定写死 `seq=0xf88f` 与 `base_sub_id=2` 的旧模板，全面接入 `session.build_fragments` / `session.build_reliable` 动态递增滑动窗口，并引入 `_next_msg_id()` 自增单调业务 ID，杜绝原生内核判定为 Duplicate Packet 静默丢包；
+  * **未连接会话的主动握手保障**：在 `send_message` 中集成活跃状态检测，若尚未建立 ENet 会话则自动触发 0x82 连接握手并在 0x83 确认后平滑投递消息。
 

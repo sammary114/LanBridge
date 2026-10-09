@@ -639,8 +639,9 @@ class LanBridgeClient:
         if opcode == 0x03EC or ("<X_SEND_MSG " in xml_str or "<X_SEND_MSG>" in xml_str):
             msg_id = extract_msg_id(xml_str)
             ack_env = build_x_send_msg_ack_envelope(msg_id)
-            frags = build_opcode_88_fragments(ack_env, header_flag=header_flag)
-            replies.extend(frags)
+            ack_pkt = session.build_reliable(channel=0, payload=ack_env)
+            replies.append(ack_pkt)
+            logger.debug("Sent authentic Opcode 0x86 ACK for msg_id=%d to %s", msg_id, peer_ip)
 
             sender_uid = "unknown"
             for uid, c in self.contacts.items():
@@ -728,6 +729,11 @@ class LanBridgeClient:
                     c.last_seen = time.time()
                     self.emit_contact_online(c)
                     break
+
+        # Opcode 1005 (0x03ED): X_SEND_MSG_ACK
+        elif opcode == Opcode.X_SEND_MSG_ACK or "<X_SEND_MSG_ACK" in xml_str:
+            ack_msg_id = extract_msg_id(xml_str)
+            logger.info("Received delivery confirmation ACK for msg_id=%d from %s", ack_msg_id, peer_ip)
 
         # Opcode 1008 (0x03F0): X_SEND_WRITTING (Typing State)
         elif opcode == Opcode.X_SEND_WRITTING or "<X_SEND_WRITTING" in xml_str:
@@ -1794,16 +1800,35 @@ class LanBridgeClient:
         except Exception as e:
             logger.warning("Error during auto subnet scan: %s", e)
 
+    def _next_msg_id(self) -> int:
+        """Generate a monotonically increasing message sequence ID."""
+        if not hasattr(self, "_msg_seq_counter"):
+            self._msg_seq_counter = int(time.time() * 1000) & 0x3FFFFFFF
+        self._msg_seq_counter = (self._msg_seq_counter + 1) & 0x7FFFFFFF
+        return self._msg_seq_counter
+
     async def send_message(self, target_ip: str, text: str) -> None:
         """Send a text message to a specific IP endpoint."""
         session = self.get_session(target_ip)
-        header_flag = session.get_header_flag()
-        env = build_x_send_msg_envelope(text)
-        frags = build_opcode_88_fragments(env, header_flag=header_flag)
+        if not session.connected or session.peer_id == 0:
+            logger.info("Session to %s not active, initiating ENet connection handshake...", target_ip)
+            await self._proactive_connect(target_ip)
+            for _ in range(20):
+                if session.connected and session.peer_id != 0:
+                    break
+                await asyncio.sleep(0.05)
+
+        msg_id = self._next_msg_id()
+        env = build_x_send_msg_envelope(text, msg_id=msg_id)
+        if len(env) <= 1372:
+            packets = [session.build_reliable(0, env)]
+        else:
+            packets = session.build_fragments(0, env)
+
         if self._udp_9012_transport:
-            for frag in frags:
-                self._udp_9012_transport.sendto(frag, (target_ip, self.main_port))
-            logger.info("Sent message to %s: '%s'", target_ip, text[:30])
+            for pkt in packets:
+                self._udp_9012_transport.sendto(pkt, (target_ip, self.main_port))
+            logger.info("Sent message (msg_id=%d) to %s: '%s' (%d packets)", msg_id, target_ip, text[:30], len(packets))
 
     async def send_group_message(
         self,
@@ -1816,7 +1841,8 @@ class LanBridgeClient:
         If target_ip is provided, sends to that peer; otherwise broadcasts to all contacts
         and configured broadcast addresses.
         """
-        env = build_x_qgroup_send_msg_envelope(qgroup_id=qgroup_id, text=text)
+        msg_id = self._next_msg_id()
+        env = build_x_qgroup_send_msg_envelope(qgroup_id=qgroup_id, text=text, msg_id=msg_id)
         if not self._udp_9012_transport:
             return
 
@@ -1832,10 +1858,13 @@ class LanBridgeClient:
 
         for dest in destinations:
             session = self.get_session(dest)
-            frags = build_opcode_88_fragments(env, header_flag=session.get_header_flag())
-            for frag in frags:
+            if len(env) <= 1372:
+                packets = [session.build_reliable(0, env)]
+            else:
+                packets = session.build_fragments(0, env)
+            for pkt in packets:
                 try:
-                    self._udp_9012_transport.sendto(frag, (dest, self.main_port))
+                    self._udp_9012_transport.sendto(pkt, (dest, self.main_port))
                 except Exception as e:
                     logger.debug("Failed sending group msg frag to %s: %s", dest, e)
         logger.info("Sent group msg to %s (len=%d) -> %d destinations", qgroup_id, len(text), len(destinations))
