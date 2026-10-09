@@ -148,6 +148,16 @@ class TestWebGateway(AioHTTPTestCase):
         resp_404 = await self.client.get("/api/images/00000000000000000000000000000000")
         self.assertEqual(resp_404.status, 404)
 
+    @unittest_run_loop
+    async def test_static_vue_js(self):
+        """Test GET /static/vue.global.prod.js offline availability."""
+        resp = await self.client.get("/static/vue.global.prod.js")
+        self.assertEqual(resp.status, 200)
+        text = await resp.text()
+        self.assertIn("Vue", text)
+        self.assertTrue(len(text) > 50000)
+
+
 
 if __name__ == "__main__":
     import unittest

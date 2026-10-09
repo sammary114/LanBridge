@@ -69,6 +69,10 @@ class WebGateway:
         self.app.router.add_post("/api/status", self.handle_post_status)
         self.app.router.add_post("/api/share_file", self.handle_post_share_file)
 
+        static_dir = os.path.join(os.path.dirname(__file__), "static")
+        if os.path.isdir(static_dir):
+            self.app.router.add_static("/static/", static_dir)
+
     def _setup_client_listeners(self) -> None:
         self.client.on_message(self._on_message)
         self.client.on_group_message(self._on_group_message)

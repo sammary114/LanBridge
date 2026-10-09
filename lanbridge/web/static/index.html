@@ -13,6 +13,7 @@
             --accent-hover: #2563eb;
             --accent-green: #10b981;
             --accent-red: #ef4444;
+            --accent-yellow: #f59e0b;
             --text-main: #f1f5f9;
             --text-muted: #94a3b8;
             --border-color: #334155;
@@ -35,13 +36,20 @@
             overflow: hidden;
         }
 
+        #app {
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+
         /* Sidebar */
         .sidebar {
-            width: 340px;
+            width: 350px;
             background-color: var(--bg-secondary);
             border-right: 1px solid var(--border-color);
             display: flex;
             flex-direction: column;
+            user-select: none;
         }
 
         .user-profile {
@@ -50,7 +58,7 @@
             align-items: center;
             gap: 12px;
             border-bottom: 1px solid var(--border-color);
-            background: linear-gradient(135deg, rgba(37,99,235,0.1), transparent);
+            background: linear-gradient(135deg, rgba(37,99,235,0.12), transparent);
         }
 
         .avatar {
@@ -62,9 +70,11 @@
             align-items: center;
             justify-content: center;
             font-weight: bold;
-            font-size: 18px;
+            font-size: 16px;
             color: #fff;
             position: relative;
+            flex-shrink: 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
         }
 
         .status-dot {
@@ -76,6 +86,15 @@
             position: absolute;
             bottom: -1px;
             right: -1px;
+            transition: background-color 0.2s ease;
+        }
+
+        .status-dot.away {
+            background-color: var(--accent-yellow);
+        }
+
+        .status-dot.offline {
+            background-color: #64748b;
         }
 
         .user-info {
@@ -97,17 +116,42 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            margin-top: 2px;
         }
 
+        /* Search & Filter Bar */
+        .search-box {
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border-color);
+            background-color: rgba(18, 24, 36, 0.4);
+        }
+
+        .search-input {
+            width: 100%;
+            background-color: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 6px 12px;
+            color: var(--text-main);
+            font-size: 13px;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+
+        .search-input:focus {
+            border-color: var(--accent);
+        }
+
+        /* Tab Switcher */
         .tabs {
             display: flex;
             border-bottom: 1px solid var(--border-color);
-            background-color: rgba(0,0,0,0.1);
+            background-color: var(--bg-primary);
         }
 
         .tab-btn {
             flex: 1;
-            padding: 12px 6px;
+            padding: 12px 0;
             background: none;
             border: none;
             color: var(--text-muted);
@@ -115,30 +159,52 @@
             font-weight: 500;
             cursor: pointer;
             transition: all 0.2s;
-            text-align: center;
+            position: relative;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-main);
         }
 
         .tab-btn.active {
             color: var(--accent);
-            border-bottom: 2px solid var(--accent);
-            background-color: rgba(59, 130, 246, 0.05);
+            font-weight: 600;
         }
 
+        .tab-btn.active::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 20%;
+            width: 60%;
+            height: 2px;
+            background-color: var(--accent);
+            border-radius: 2px;
+        }
+
+        .badge-count {
+            display: inline-block;
+            background: rgba(255,255,255,0.1);
+            padding: 1px 6px;
+            border-radius: 10px;
+            font-size: 11px;
+            margin-left: 4px;
+        }
+
+        /* Contact & Group List */
         .list-container {
             flex: 1;
             overflow-y: auto;
-            padding: 8px;
         }
 
         .list-item {
+            padding: 12px 16px;
             display: flex;
             align-items: center;
             gap: 12px;
-            padding: 10px 12px;
-            border-radius: 8px;
             cursor: pointer;
+            border-bottom: 1px solid rgba(51, 65, 85, 0.4);
             transition: background 0.15s;
-            margin-bottom: 4px;
         }
 
         .list-item:hover {
@@ -146,21 +212,30 @@
         }
 
         .list-item.active {
-            background-color: rgba(59, 130, 246, 0.2);
+            background-color: rgba(59, 130, 246, 0.15);
             border-left: 3px solid var(--accent);
         }
 
         .item-avatar {
-            width: 38px;
-            height: 38px;
-            border-radius: 50%;
-            background: #334155;
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            background-color: var(--bg-tertiary);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-weight: 600;
             font-size: 14px;
-            color: #cbd5e1;
+            font-weight: bold;
+            color: #fff;
+            flex-shrink: 0;
+        }
+
+        .item-avatar.group-avatar {
+            background: linear-gradient(135deg, #4f46e5, #7c3aed);
+        }
+
+        .item-avatar.file-avatar {
+            background: linear-gradient(135deg, #059669, #10b981);
         }
 
         .item-details {
@@ -169,10 +244,18 @@
         }
 
         .item-title {
-            font-size: 14px;
-            font-weight: 500;
             display: flex;
             justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .item-title-name {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 170px;
         }
 
         .item-sub {
@@ -181,30 +264,37 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            margin-top: 2px;
+            margin-top: 3px;
         }
 
-        /* Main Chat Area */
+        .empty-placeholder {
+            padding: 36px 16px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        /* Chat Area */
         .chat-area {
             flex: 1;
             display: flex;
             flex-direction: column;
             background-color: var(--bg-primary);
-            position: relative;
         }
 
         .chat-header {
             padding: 14px 20px;
-            background-color: var(--bg-secondary);
             border-bottom: 1px solid var(--border-color);
+            background-color: var(--bg-secondary);
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
 
         .chat-title {
-            font-size: 16px;
             font-weight: 600;
+            font-size: 16px;
         }
 
         .chat-subtitle {
@@ -216,28 +306,38 @@
         .header-actions {
             display: flex;
             gap: 10px;
+            align-items: center;
         }
 
         .btn-action {
             background-color: var(--bg-tertiary);
-            color: var(--text-main);
             border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 7px 14px;
             border-radius: 6px;
-            padding: 6px 12px;
-            font-size: 12px;
+            font-size: 13px;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.15s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
         }
 
-        .btn-action:hover {
-            background-color: var(--accent);
+        .btn-action:hover:not(:disabled) {
+            background-color: rgba(59, 130, 246, 0.2);
             border-color: var(--accent);
         }
 
+        .btn-action:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        /* Messages stream */
         .messages-container {
             flex: 1;
-            overflow-y: auto;
             padding: 20px;
+            overflow-y: auto;
             display: flex;
             flex-direction: column;
             gap: 16px;
@@ -246,8 +346,7 @@
         .message {
             display: flex;
             flex-direction: column;
-            max-width: 65%;
-            position: relative;
+            max-width: 72%;
         }
 
         .message.self {
@@ -260,13 +359,20 @@
             align-items: flex-start;
         }
 
+        .sender-tag {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-bottom: 3px;
+            margin-left: 2px;
+        }
+
         .bubble {
             padding: 10px 14px;
             border-radius: 12px;
             font-size: 14px;
             line-height: 1.5;
             word-break: break-word;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12);
         }
 
         .message.self .bubble {
@@ -279,7 +385,21 @@
             background-color: var(--bubble-peer);
             color: var(--text-main);
             border-bottom-left-radius: 2px;
-            border: 1px solid var(--border-color);
+            border: 1px solid rgba(51, 65, 85, 0.6);
+        }
+
+        .chat-image {
+            max-width: 260px;
+            max-height: 260px;
+            border-radius: 8px;
+            cursor: pointer;
+            display: block;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            transition: transform 0.15s;
+        }
+
+        .chat-image:hover {
+            transform: scale(1.02);
         }
 
         .msg-meta {
@@ -295,8 +415,9 @@
             background: none;
             border: none;
             color: var(--text-muted);
-            font-size: 11px;
             cursor: pointer;
+            font-size: 11px;
+            padding: 0;
             text-decoration: underline;
         }
 
@@ -305,49 +426,53 @@
         }
 
         .recalled-notice {
-            font-style: italic;
-            color: var(--text-muted);
+            background-color: rgba(51, 65, 85, 0.4);
+            padding: 4px 12px;
+            border-radius: 12px;
             font-size: 12px;
-            padding: 4px 10px;
-            background: rgba(255,255,255,0.05);
-            border-radius: 6px;
+            color: var(--text-muted);
+            align-self: center;
+            margin: 6px 0;
         }
 
         .typing-banner {
+            padding: 4px 20px;
             font-size: 12px;
             color: var(--accent);
-            padding: 4px 20px;
             min-height: 24px;
-            font-style: italic;
+            display: flex;
+            align-items: center;
+            gap: 6px;
         }
 
+        /* Input area */
         .input-bar {
-            padding: 16px 20px;
+            padding: 14px 20px;
             background-color: var(--bg-secondary);
             border-top: 1px solid var(--border-color);
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
         }
 
         .input-tools {
             display: flex;
-            gap: 8px;
+            gap: 10px;
+            margin-bottom: 8px;
         }
 
         .tool-btn {
             background: none;
-            border: none;
-            color: var(--text-muted);
-            cursor: pointer;
-            padding: 4px 8px;
+            border: 1px solid var(--border-color);
             border-radius: 4px;
-            font-size: 13px;
+            padding: 4px 10px;
+            color: var(--text-muted);
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.15s;
         }
 
         .tool-btn:hover {
-            background-color: var(--bg-tertiary);
             color: var(--text-main);
+            border-color: var(--accent);
+            background: rgba(59, 130, 246, 0.1);
         }
 
         .input-row {
@@ -365,7 +490,8 @@
             font-size: 14px;
             outline: none;
             resize: none;
-            height: 48px;
+            height: 52px;
+            transition: border-color 0.15s;
         }
 
         .chat-input:focus {
@@ -377,7 +503,7 @@
             color: #fff;
             border: none;
             border-radius: 8px;
-            padding: 0 20px;
+            padding: 0 22px;
             font-weight: 500;
             font-size: 14px;
             cursor: pointer;
@@ -392,9 +518,9 @@
         .modal-overlay {
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0,0,0,0.6);
+            background: rgba(0,0,0,0.65);
             backdrop-filter: blur(4px);
-            display: none;
+            display: flex;
             align-items: center;
             justify-content: center;
             z-index: 100;
@@ -405,10 +531,11 @@
             border: 1px solid var(--border-color);
             border-radius: 12px;
             padding: 24px;
-            width: 420px;
+            width: 440px;
             display: flex;
             flex-direction: column;
             gap: 16px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.4);
         }
 
         .modal-title {
@@ -435,6 +562,11 @@
             color: var(--text-main);
             font-size: 14px;
             outline: none;
+            transition: border-color 0.15s;
+        }
+
+        .form-input:focus {
+            border-color: var(--accent);
         }
 
         .form-actions {
@@ -444,502 +576,654 @@
             margin-top: 8px;
         }
     </style>
+    <!-- 本地生产版 Vue 3 核心引擎 (100% 局域网脱机离线可用) -->
+    <script src="/static/vue.global.prod.js"></script>
 </head>
 <body>
-    <div class="sidebar">
-        <div class="user-profile">
-            <div class="avatar" id="myAvatar">
-                LB
-                <div class="status-dot"></div>
+    <div id="app">
+        <!-- 侧边栏 -->
+        <div class="sidebar">
+            <div class="user-profile">
+                <div class="avatar">
+                    {{ myInfo.avatar }}
+                    <div class="status-dot" :class="myStatusClass"></div>
+                </div>
+                <div class="user-info">
+                    <div class="user-name">{{ myInfo.nickname || 'LanBridge Client' }}</div>
+                    <div class="user-meta">{{ myInfo.local_ip }}:{{ myInfo.main_port }} [{{ myStatusText }}]</div>
+                </div>
             </div>
-            <div class="user-info">
-                <div class="user-name" id="myNickname">LanBridge Client</div>
-                <div class="user-meta" id="myIp">127.0.0.1 (Loading...)</div>
+
+            <!-- 搜索框 -->
+            <div class="search-box">
+                <input class="search-input" v-model="searchQuery" placeholder="搜索联系人 / 讨论组..." />
             </div>
-        </div>
 
-        <div class="tabs">
-            <button class="tab-btn active" onclick="switchTab('contacts')">联系人</button>
-            <button class="tab-btn" onclick="switchTab('groups')">讨论组</button>
-            <button class="tab-btn" onclick="switchTab('files')">群共享</button>
-        </div>
-
-        <div class="list-container" id="listContainer">
-            <!-- Dynamic list items -->
-        </div>
-    </div>
-
-    <div class="chat-area">
-        <div class="chat-header">
-            <div>
-                <div class="chat-title" id="chatTitle">选择联系人或讨论组</div>
-                <div class="chat-subtitle" id="chatSubtitle">已就绪</div>
+            <!-- 选项卡切换 -->
+            <div class="tabs">
+                <button class="tab-btn" :class="{ active: currentTab === 'contacts' }" @click="switchTab('contacts')">
+                    联系人 <span class="badge-count">{{ filteredContacts.length }}</span>
+                </button>
+                <button class="tab-btn" :class="{ active: currentTab === 'groups' }" @click="switchTab('groups')">
+                    讨论组 <span class="badge-count">{{ filteredGroups.length }}</span>
+                </button>
+                <button class="tab-btn" :class="{ active: currentTab === 'files' }" @click="switchTab('files')">
+                    群共享 <span class="badge-count">{{ sharedFiles.length }}</span>
+                </button>
             </div>
-            <div class="header-actions">
-                <button class="btn-action" onclick="syncNativeNwt()" id="btnSyncNative" title="从原生内网通目录无缝导入群聊、配置与共享">同步原生内网通</button>
-                <button class="btn-action" onclick="openCreateGroupModal()">新建讨论组</button>
-            </div>
-        </div>
 
-        <div class="messages-container" id="messagesContainer">
-            <!-- Messages stream -->
-        </div>
-
-        <div class="typing-banner" id="typingBanner"></div>
-
-        <div class="input-bar">
-            <div class="input-tools">
-                <button class="tool-btn" onclick="sendShake()">抖动窗口</button>
-                <button class="tool-btn" onclick="triggerFileShare()">共享文件</button>
-            </div>
-            <div class="input-row">
-                <textarea class="chat-input" id="chatInput" placeholder="输入消息 (Enter 发送, Shift+Enter 换行)..."></textarea>
-                <button class="send-btn" onclick="sendMessage()">发送</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Create Group Modal -->
-    <div class="modal-overlay" id="createGroupModal">
-        <div class="modal-card">
-            <div class="modal-title">创建新讨论组</div>
-            <div class="form-group">
-                <label>讨论组名称</label>
-                <input class="form-input" id="newGroupName" placeholder="例如：架构研发攻坚组">
-            </div>
-            <div class="form-group">
-                <label>群公告</label>
-                <input class="form-input" id="newGroupAnn" placeholder="输入讨论组公告">
-            </div>
-            <div class="form-actions">
-                <button class="btn-action" onclick="closeCreateGroupModal()">取消</button>
-                <button class="send-btn" onclick="submitCreateGroup()">创建</button>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        let currentTab = 'contacts';
-        let currentChat = null; // { type: 'peer' | 'group', id: string, name: string, ip?: string }
-        let contacts = [];
-        let groups = [];
-        let sharedFiles = [];
-        let messages = []; // Array of message objects
-        let typingTimeout = null;
-        let ws = null;
-
-        async function init() {
-            await fetchStatus();
-            await fetchContacts();
-            await fetchGroups();
-            setupWebSocket();
-            setupInputDebounce();
-        }
-
-        async function fetchStatus() {
-            try {
-                const res = await fetch('/api/status');
-                const data = await res.json();
-                if (data.ok) {
-                    document.getElementById('myNickname').textContent = data.nickname;
-                    document.getElementById('myIp').textContent = `${data.local_ip}:${data.main_port} [${data.status === 0 ? '在线' : '离开'}]`;
-                    document.getElementById('myAvatar').firstChild.textContent = data.nickname.slice(0, 2);
-                }
-            } catch (e) {
-                console.error("Failed fetching status", e);
-            }
-        }
-
-        async function fetchContacts() {
-            try {
-                const res = await fetch('/api/contacts');
-                const data = await res.json();
-                if (data.ok) {
-                    contacts = data.contacts;
-                    if (currentTab === 'contacts') renderList();
-                }
-            } catch (e) {
-                console.error("Failed fetching contacts", e);
-            }
-        }
-
-        async function fetchGroups() {
-            try {
-                const res = await fetch('/api/groups');
-                const data = await res.json();
-                if (data.ok) {
-                    groups = data.groups;
-                    if (currentTab === 'groups') renderList();
-                }
-            } catch (e) {
-                console.error("Failed fetching groups", e);
-            }
-        }
-
-        async function fetchFiles() {
-            try {
-                const res = await fetch('/api/shared_files');
-                const data = await res.json();
-                if (data.ok) {
-                    sharedFiles = data.files;
-                    if (currentTab === 'files') renderList();
-                }
-            } catch (e) {
-                console.error("Failed fetching files", e);
-            }
-        }
-        const fetchSharedFiles = fetchFiles;
-
-        function switchTab(tab) {
-            currentTab = tab;
-            document.querySelectorAll('.tab-btn').forEach((btn, idx) => {
-                btn.classList.toggle('active', (tab === 'contacts' && idx === 0) || (tab === 'groups' && idx === 1) || (tab === 'files' && idx === 2));
-            });
-            if (tab === 'files') fetchFiles();
-            renderList();
-        }
-
-        function renderList() {
-            const container = document.getElementById('listContainer');
-            container.innerHTML = '';
-
-            if (currentTab === 'contacts') {
-                contacts.forEach(c => {
-                    const item = document.createElement('div');
-                    item.className = `list-item ${currentChat && currentChat.id === c.user_id ? 'active' : ''}`;
-                    item.onclick = () => selectChat({ type: 'peer', id: c.user_id, name: c.nickname || c.user_id, ip: c.ip });
-                    item.innerHTML = `
-                        <div class="item-avatar">${(c.nickname || 'U').slice(0, 2)}</div>
+            <!-- 动态列表 -->
+            <div class="list-container">
+                <!-- 联系人列表 -->
+                <template v-if="currentTab === 'contacts'">
+                    <div
+                        v-for="c in filteredContacts"
+                        :key="c.user_id"
+                        class="list-item"
+                        :class="{ active: currentChat && currentChat.type === 'peer' && currentChat.id === c.user_id }"
+                        @click="selectChat({ type: 'peer', id: c.user_id, name: c.nickname || c.user_id, ip: c.ip })"
+                    >
+                        <div class="item-avatar">{{ (c.nickname || 'U').slice(0, 2) }}</div>
                         <div class="item-details">
                             <div class="item-title">
-                                <span>${escapeHtml(c.nickname || c.user_id)}</span>
-                                <span style="font-size:11px;color:${c.status === 0 ? '#10b981' : '#94a3b8'}">● 在线</span>
+                                <span class="item-title-name">{{ c.nickname || c.user_id }}</span>
+                                <span style="font-size:11px;" :style="{ color: c.status === 0 ? '#10b981' : '#94a3b8' }">
+                                    ● {{ c.status === 0 ? '在线' : '离开' }}
+                                </span>
                             </div>
-                            <div class="item-sub">${c.ip}:${c.port} (${c.group_name || '联系人'})</div>
+                            <div class="item-sub">{{ c.ip }}:{{ c.port }} ({{ c.group_name || '联系人' }})</div>
                         </div>
-                    `;
-                    container.appendChild(item);
-                });
-            } else if (currentTab === 'groups') {
-                groups.forEach(g => {
-                    const item = document.createElement('div');
-                    item.className = `list-item ${currentChat && currentChat.id === g.qgroup_id ? 'active' : ''}`;
-                    item.onclick = () => selectChat({ type: 'group', id: g.qgroup_id, name: g.name });
-                    item.innerHTML = `
-                        <div class="item-avatar" style="background:#4338ca;">群</div>
+                    </div>
+                    <div v-if="filteredContacts.length === 0" class="empty-placeholder">
+                        暂无在线联系人<br><small>系统正通过 UDP 9011 在局域网自动发现邻居...</small>
+                    </div>
+                </template>
+
+                <!-- 讨论组列表 -->
+                <template v-else-if="currentTab === 'groups'">
+                    <div
+                        v-for="g in filteredGroups"
+                        :key="g.qgroup_id"
+                        class="list-item"
+                        :class="{ active: currentChat && currentChat.type === 'group' && currentChat.id === g.qgroup_id }"
+                        @click="selectChat({ type: 'group', id: g.qgroup_id, name: g.name })"
+                    >
+                        <div class="item-avatar group-avatar">群</div>
                         <div class="item-details">
                             <div class="item-title">
-                                <span>${escapeHtml(g.name)}</span>
-                                <span style="font-size:11px;color:#94a3b8">${Object.keys(g.members || {}).length} 人</span>
+                                <span class="item-title-name">{{ g.name }}</span>
+                                <span style="font-size:11px;color:#94a3b8">{{ Object.keys(g.members || {}).length }} 人</span>
                             </div>
-                            <div class="item-sub">${escapeHtml(g.announcement || g.intro || '暂无公告')}</div>
+                            <div class="item-sub">{{ g.announcement || g.intro || '暂无公告' }}</div>
                         </div>
-                    `;
-                    container.appendChild(item);
-                });
-            } else if (currentTab === 'files') {
-                sharedFiles.forEach(f => {
-                    const item = document.createElement('div');
-                    item.className = 'list-item';
-                    const sizeMb = (f.filesize / (1024 * 1024)).toFixed(2);
-                    item.innerHTML = `
-                        <div class="item-avatar" style="background:#059669;">文</div>
+                    </div>
+                    <div v-if="filteredGroups.length === 0" class="empty-placeholder">
+                        暂无论坛或讨论组<br><small>点击右上角“新建讨论组”或“同步原生内网通”</small>
+                    </div>
+                </template>
+
+                <!-- 群共享列表 -->
+                <template v-else-if="currentTab === 'files'">
+                    <div
+                        v-for="f in sharedFiles"
+                        :key="f.file_id || f.file_md5"
+                        class="list-item"
+                    >
+                        <div class="item-avatar file-avatar">文</div>
                         <div class="item-details">
                             <div class="item-title">
-                                <span>${escapeHtml(f.filename)}</span>
-                                <span style="font-size:11px;color:#94a3b8">${sizeMb} MB</span>
+                                <span class="item-title-name">{{ f.filename }}</span>
+                                <span style="font-size:11px;color:#94a3b8">{{ (f.filesize / 1048576).toFixed(2) }} MB</span>
                             </div>
-                            <div class="item-sub">来自 ${escapeHtml(f.uploader_name)} (${f.uploader_ip})</div>
+                            <div class="item-sub">来自 {{ f.uploader_name || '成员' }} ({{ f.uploader_ip }})</div>
                         </div>
-                    `;
-                    container.appendChild(item);
-                });
-            }
-        }
+                    </div>
+                    <div v-if="sharedFiles.length === 0" class="empty-placeholder">
+                        暂无共享文件<br><small>讨论组群空间当前为空</small>
+                    </div>
+                </template>
+            </div>
+        </div>
 
-        function selectChat(chat) {
-            currentChat = chat;
-            document.getElementById('chatTitle').textContent = chat.name;
-            document.getElementById('chatSubtitle').textContent = chat.type === 'peer' ? `IP: ${chat.ip}` : `讨论组 ID: ${chat.id}`;
-            renderMessages();
-            renderList();
-        }
+        <!-- 聊天主区域 -->
+        <div class="chat-area">
+            <div class="chat-header">
+                <div>
+                    <div class="chat-title">{{ currentChat ? currentChat.name : '选择联系人或讨论组' }}</div>
+                    <div class="chat-subtitle">
+                        {{ currentChat ? (currentChat.type === 'peer' ? `IP: ${currentChat.ip}` : `讨论组 ID: ${currentChat.id}`) : '已就绪' }}
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <button
+                        class="btn-action"
+                        :disabled="isSyncing"
+                        @click="syncNativeNwt"
+                        title="从原生内网通目录无缝导入群聊、配置与共享"
+                    >
+                        {{ isSyncing ? '正在同步...' : '同步原生内网通' }}
+                    </button>
+                    <button class="btn-action" @click="showCreateGroupModal = true">
+                        新建讨论组
+                    </button>
+                </div>
+            </div>
 
-        function renderMessages() {
-            const container = document.getElementById('messagesContainer');
-            container.innerHTML = '';
-            if (!currentChat) return;
-
-            const relevant = messages.filter(m => {
-                if (currentChat.type === 'peer') {
-                    return m.type === 'peer' && (m.sender_id === currentChat.id || m.recipient_id === currentChat.id);
-                } else {
-                    return m.type === 'group' && m.qgroup_id === currentChat.id;
-                }
-            });
-
-            relevant.forEach(m => {
-                const isSelf = m.is_self;
-                const msgEl = document.createElement('div');
-                msgEl.className = `message ${isSelf ? 'self' : 'peer'}`;
-
-                if (m.recalled) {
-                    msgEl.innerHTML = `<div class="recalled-notice">${isSelf ? '你' : '对方'} 撤回了一条消息</div>`;
-                } else {
-                    const timeStr = new Date(m.timestamp * 1000).toLocaleTimeString();
-                    let bubbleContent = '';
-                    if (m.is_image && m.image_md5) {
-                        bubbleContent = `<div><img src="/api/images/${m.image_md5}" style="max-width:240px;max-height:240px;border-radius:8px;cursor:pointer;display:block;" onclick="window.open(this.src)" alt="图片" onerror="this.onerror=null;this.src='';this.alt='[图片已过期或未找到]'">${m.text ? `<div style="margin-top:6px;">${escapeHtml(m.text)}</div>` : ''}</div>`;
-                    } else {
-                        bubbleContent = escapeHtml(m.text || '');
-                    }
-                    msgEl.innerHTML = `
-                        <div class="bubble">${bubbleContent}</div>
+            <!-- 消息历史流 -->
+            <div class="messages-container" ref="messagesContainerRef">
+                <template v-for="m in currentMessages" :key="m.msg_id">
+                    <div v-if="m.recalled" class="recalled-notice">
+                        {{ m.is_self ? '你' : '对方' }} 撤回了一条消息
+                    </div>
+                    <div v-else class="message" :class="m.is_self ? 'self' : 'peer'">
+                        <div v-if="!m.is_self && currentChat && currentChat.type === 'group'" class="sender-tag">
+                            {{ m.sender_name || m.sender_id }}
+                        </div>
+                        <div class="bubble">
+                            <div v-if="m.is_image && m.image_md5">
+                                <img
+                                    :src="'/api/images/' + m.image_md5"
+                                    class="chat-image"
+                                    @click="openImage('/api/images/' + m.image_md5)"
+                                    alt="图片"
+                                    loading="lazy"
+                                />
+                                <div v-if="m.text" style="margin-top: 6px;">{{ m.text }}</div>
+                            </div>
+                            <div v-else>
+                                {{ m.text }}
+                            </div>
+                        </div>
                         <div class="msg-meta">
-                            <span>${timeStr}</span>
-                            ${isSelf ? `<button class="recall-btn" onclick="recallMessage(${m.msg_id}, '${m.uuid || ''}')">撤回</button>` : ''}
+                            <span>{{ formatTime(m.timestamp) }}</span>
+                            <button
+                                v-if="m.is_self && !m.recalled"
+                                class="recall-btn"
+                                @click="recallMessage(m)"
+                            >
+                                撤回
+                            </button>
                         </div>
-                    `;
-                }
-                container.appendChild(msgEl);
-            });
-            container.scrollTop = container.scrollHeight;
-        }
+                    </div>
+                </template>
+                <div v-if="!currentChat" class="empty-placeholder" style="margin: auto;">
+                    👈 请在左侧列表中选择联系人或讨论组开启即时会话
+                </div>
+            </div>
 
-        async function sendMessage() {
-            const input = document.getElementById('chatInput');
-            const text = input.value.trim();
-            if (!text || !currentChat) return;
+            <!-- 正在输入提示栏 -->
+            <div class="typing-banner">
+                <span v-if="typingText">💬 {{ typingText }}</span>
+            </div>
 
-            input.value = '';
-            const msgId = Date.now();
-            const selfMsg = {
-                msg_id: msgId,
-                type: currentChat.type,
-                sender_id: 'me',
-                recipient_id: currentChat.id,
-                qgroup_id: currentChat.id,
-                text: text,
-                timestamp: Date.now() / 1000,
-                is_self: true,
-                uuid: 'msg_' + msgId,
-            };
-            messages.push(selfMsg);
-            renderMessages();
+            <!-- 输入区域 -->
+            <div class="input-bar">
+                <div class="input-tools">
+                    <button class="tool-btn" :disabled="!currentChat" @click="sendShake">窗口抖动</button>
+                    <button class="tool-btn" :disabled="!currentChat || currentChat.type !== 'group'" @click="triggerFileShare">群共享文件</button>
+                </div>
+                <div class="input-row">
+                    <textarea
+                        class="chat-input"
+                        v-model="inputMessage"
+                        :disabled="!currentChat"
+                        placeholder="输入消息 (Enter 发送, Shift+Enter 换行)..."
+                        @keydown="onInputKeydown"
+                    ></textarea>
+                    <button class="send-btn" :disabled="!currentChat" @click="sendMessage">发送</button>
+                </div>
+            </div>
+        </div>
 
-            try {
-                if (currentChat.type === 'peer') {
-                    await fetch('/api/message', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ target_ip: currentChat.ip, text: text })
+        <!-- 创建讨论组模态对话框 -->
+        <div v-if="showCreateGroupModal" class="modal-overlay" @click.self="showCreateGroupModal = false">
+            <div class="modal-card">
+                <div class="modal-title">创建新讨论组</div>
+                <div class="form-group">
+                    <label>讨论组名称</label>
+                    <input class="form-input" v-model.trim="newGroup.name" placeholder="例如：架构研发攻坚组" />
+                </div>
+                <div class="form-group">
+                    <label>群公告</label>
+                    <input class="form-input" v-model.trim="newGroup.announcement" placeholder="输入讨论组公告" />
+                </div>
+                <div class="form-actions">
+                    <button class="btn-action" @click="showCreateGroupModal = false">取消</button>
+                    <button class="send-btn" :disabled="!newGroup.name" @click="submitCreateGroup">创建</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Vue 3 响应式业务控制器 -->
+    <script>
+        const { createApp, ref, reactive, computed, nextTick, onMounted } = Vue;
+
+        createApp({
+            setup() {
+                // 1. 本地状态
+                const myInfo = reactive({
+                    nickname: 'LanBridge Client',
+                    local_ip: '127.0.0.1',
+                    main_port: 9012,
+                    status: 0,
+                    avatar: 'LB',
+                });
+
+                const currentTab = ref('contacts');
+                const searchQuery = ref('');
+                const contacts = ref([]);
+                const groups = ref([]);
+                const sharedFiles = ref([]);
+                const messages = ref([]);
+                const currentChat = ref(null);
+                const inputMessage = ref('');
+                const typingText = ref('');
+                const isSyncing = ref(false);
+                const showCreateGroupModal = ref(false);
+                const newGroup = reactive({ name: '', announcement: '' });
+                const messagesContainerRef = ref(null);
+
+                let ws = null;
+                let typingTimeout = null;
+                let isTyping = false;
+                let stopTypingTimer = null;
+
+                // 2. 计算属性
+                const myStatusText = computed(() => myInfo.status === 0 ? '在线' : '离开');
+                const myStatusClass = computed(() => myInfo.status === 0 ? '' : 'away');
+
+                const filteredContacts = computed(() => {
+                    const q = searchQuery.value.toLowerCase().trim();
+                    if (!q) return contacts.value;
+                    return contacts.value.filter(c =>
+                        (c.nickname && c.nickname.toLowerCase().includes(q)) ||
+                        (c.user_id && c.user_id.toLowerCase().includes(q)) ||
+                        (c.ip && c.ip.includes(q))
+                    );
+                });
+
+                const filteredGroups = computed(() => {
+                    const q = searchQuery.value.toLowerCase().trim();
+                    if (!q) return groups.value;
+                    return groups.value.filter(g =>
+                        (g.name && g.name.toLowerCase().includes(q)) ||
+                        (g.qgroup_id && g.qgroup_id.includes(q))
+                    );
+                });
+
+                const currentMessages = computed(() => {
+                    if (!currentChat.value) return [];
+                    const chat = currentChat.value;
+                    return messages.value.filter(m => {
+                        if (chat.type === 'peer') {
+                            return m.type === 'peer' && (m.sender_id === chat.id || m.recipient_id === chat.id);
+                        } else {
+                            return m.type === 'group' && m.qgroup_id === chat.id;
+                        }
                     });
-                } else {
-                    await fetch('/api/group_message', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ qgroup_id: currentChat.id, text: text })
-                    });
-                }
-            } catch (e) {
-                console.error("Failed sending message", e);
-            }
-        }
-
-        async function recallMessage(msgId, uuid) {
-            if (!currentChat) return;
-            try {
-                await fetch('/api/recall', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        target_ip: currentChat.ip || '',
-                        target_msg_id: msgId,
-                        target_uuid: uuid,
-                        qgroup_id: currentChat.type === 'group' ? currentChat.id : null,
-                    })
                 });
-                const m = messages.find(x => x.msg_id === msgId);
-                if (m) {
-                    m.recalled = true;
-                    renderMessages();
-                }
-            } catch (e) {
-                console.error("Failed recalling message", e);
-            }
-        }
 
-        function setupWebSocket() {
-            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            ws = new WebSocket(`${proto}//${location.host}/ws`);
-
-            ws.onmessage = (e) => {
-                try {
-                    const event = JSON.parse(e.data);
-                    handleWsEvent(event);
-                } catch (err) {
-                    console.error("Invalid WS message", err);
-                }
-            };
-
-            ws.onclose = () => {
-                setTimeout(setupWebSocket, 3000);
-            };
-        }
-
-        function handleWsEvent(evt) {
-            if (evt.event === 'message') {
-                messages.push({
-                    msg_id: evt.data.msg_id,
-                    type: 'peer',
-                    sender_id: evt.data.sender_id,
-                    recipient_id: evt.data.recipient_id,
-                    text: evt.data.text,
-                    timestamp: evt.data.timestamp,
-                    is_image: evt.data.is_image,
-                    image_md5: evt.data.image_md5,
-                    is_self: false,
-                });
-                renderMessages();
-            } else if (evt.event === 'group_message') {
-                messages.push({
-                    msg_id: evt.data.msg_id,
-                    type: 'group',
-                    sender_id: evt.data.sender_id,
-                    qgroup_id: evt.data.qgroup_id,
-                    text: evt.data.text,
-                    timestamp: evt.data.timestamp,
-                    is_image: evt.data.is_image,
-                    image_md5: evt.data.image_md5,
-                    is_self: false,
-                });
-                renderMessages();
-            } else if (evt.event === 'contact_online') {
-                fetchContacts();
-            } else if (evt.event === 'typing') {
-                const banner = document.getElementById('typingBanner');
-                if (currentChat && currentChat.ip === evt.data.peer_ip && evt.data.is_typing) {
-                    banner.textContent = '对方正在输入中...';
-                    clearTimeout(typingTimeout);
-                    typingTimeout = setTimeout(() => { banner.textContent = ''; }, 3000);
-                } else {
-                    banner.textContent = '';
-                }
-            } else if (evt.event === 'recall') {
-                const m = messages.find(x => x.msg_id === evt.data.target_msg_id || x.uuid === evt.data.target_uuid);
-                if (m) {
-                    m.recalled = true;
-                    renderMessages();
-                }
-            } else if (evt.event === 'group_invite' || evt.event === 'group_member_change' || evt.event === 'group_dismiss') {
-                fetchGroups();
-            } else if (evt.event === 'group_file_shared') {
-                fetchFiles();
-            }
-        }
-
-        function setupInputDebounce() {
-            const input = document.getElementById('chatInput');
-            let isTyping = false;
-            let stopTypingTimer = null;
-
-            input.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    sendMessage();
-                    return;
-                }
-                if (currentChat && currentChat.type === 'peer' && currentChat.ip) {
-                    if (!isTyping) {
-                        isTyping = true;
-                        fetch('/api/typing', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ peer_ip: currentChat.ip, typing: true })
-                        });
+                // 3. 辅助方法
+                const scrollToBottom = async () => {
+                    await nextTick();
+                    if (messagesContainerRef.value) {
+                        messagesContainerRef.value.scrollTop = messagesContainerRef.value.scrollHeight;
                     }
-                    clearTimeout(stopTypingTimer);
-                    stopTypingTimer = setTimeout(() => {
-                        isTyping = false;
-                        fetch('/api/typing', {
+                };
+
+                const formatTime = (ts) => {
+                    if (!ts) return '';
+                    return new Date(ts * 1000).toLocaleTimeString();
+                };
+
+                const openImage = (url) => {
+                    window.open(url, '_blank');
+                };
+
+                // 4. 数据拉取接口
+                const fetchStatus = async () => {
+                    try {
+                        const res = await fetch('/api/status');
+                        const data = await res.json();
+                        if (data.ok) {
+                            myInfo.nickname = data.nickname || 'LanBridge Client';
+                            myInfo.local_ip = data.local_ip;
+                            myInfo.main_port = data.main_port;
+                            myInfo.status = data.status || 0;
+                            myInfo.avatar = (data.nickname || 'LB').slice(0, 2);
+                        }
+                    } catch (e) {
+                        console.error('Failed fetching status', e);
+                    }
+                };
+
+                const fetchContacts = async () => {
+                    try {
+                        const res = await fetch('/api/contacts');
+                        const data = await res.json();
+                        if (data.ok) {
+                            contacts.value = data.contacts || [];
+                        }
+                    } catch (e) {
+                        console.error('Failed fetching contacts', e);
+                    }
+                };
+
+                const fetchGroups = async () => {
+                    try {
+                        const res = await fetch('/api/groups');
+                        const data = await res.json();
+                        if (data.ok) {
+                            groups.value = data.groups || [];
+                        }
+                    } catch (e) {
+                        console.error('Failed fetching groups', e);
+                    }
+                };
+
+                const fetchFiles = async () => {
+                    try {
+                        const res = await fetch('/api/shared_files');
+                        const data = await res.json();
+                        if (data.ok) {
+                            sharedFiles.value = data.files || [];
+                        }
+                    } catch (e) {
+                        console.error('Failed fetching shared files', e);
+                    }
+                };
+
+                const switchTab = (tab) => {
+                    currentTab.value = tab;
+                    if (tab === 'files') fetchFiles();
+                };
+
+                const selectChat = (chat) => {
+                    currentChat.value = chat;
+                    typingText.value = '';
+                    scrollToBottom();
+                };
+
+                // 5. 消息收发与撤回
+                const sendMessage = async () => {
+                    const text = inputMessage.value.trim();
+                    if (!text || !currentChat.value) return;
+
+                    inputMessage.value = '';
+                    const msgId = Date.now();
+                    const chat = currentChat.value;
+                    const selfMsg = {
+                        msg_id: msgId,
+                        type: chat.type,
+                        sender_id: 'me',
+                        recipient_id: chat.id,
+                        qgroup_id: chat.id,
+                        text: text,
+                        timestamp: Date.now() / 1000,
+                        is_self: true,
+                        uuid: 'msg_' + msgId,
+                        is_image: false,
+                        recalled: false,
+                    };
+                    messages.value.push(selfMsg);
+                    scrollToBottom();
+
+                    try {
+                        if (chat.type === 'peer') {
+                            await fetch('/api/message', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ target_ip: chat.ip, text: text })
+                            });
+                        } else {
+                            await fetch('/api/group_message', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ qgroup_id: chat.id, text: text })
+                            });
+                        }
+                    } catch (e) {
+                        console.error('Failed sending message', e);
+                    }
+                };
+
+                const recallMessage = async (m) => {
+                    if (!currentChat.value) return;
+                    try {
+                        await fetch('/api/recall', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ peer_ip: currentChat.ip, typing: false })
+                            body: JSON.stringify({
+                                target_ip: currentChat.value.ip || '',
+                                target_msg_id: m.msg_id,
+                                target_uuid: m.uuid,
+                                qgroup_id: currentChat.value.type === 'group' ? currentChat.value.id : null,
+                            })
                         });
-                    }, 2000);
-                }
-            });
-        }
+                        m.recalled = true;
+                    } catch (e) {
+                        console.error('Failed recalling message', e);
+                    }
+                };
 
-        function openCreateGroupModal() {
-            document.getElementById('createGroupModal').style.display = 'flex';
-        }
+                const sendShake = async () => {
+                    if (!currentChat.value || currentChat.value.type !== 'peer') return;
+                    try {
+                        await fetch('/api/typing', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ peer_ip: currentChat.value.ip, typing: true })
+                        });
+                    } catch (e) {
+                        console.error('Failed sending shake', e);
+                    }
+                };
 
-        function closeCreateGroupModal() {
-            document.getElementById('createGroupModal').style.display = 'none';
-        }
+                const triggerFileShare = () => {
+                    alert('支持直接将文件放入 shared_files/ 目录或通过原生客户端同步共享空间');
+                };
 
-        async function submitCreateGroup() {
-            const name = document.getElementById('newGroupName').value.trim();
-            const ann = document.getElementById('newGroupAnn').value.trim();
-            if (!name) return;
+                const onInputKeydown = (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        sendMessage();
+                        return;
+                    }
+                    if (currentChat.value && currentChat.value.type === 'peer' && currentChat.value.ip) {
+                        if (!isTyping) {
+                            isTyping = true;
+                            fetch('/api/typing', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ peer_ip: currentChat.value.ip, typing: true })
+                            }).catch(() => {});
+                        }
+                        clearTimeout(stopTypingTimer);
+                        stopTypingTimer = setTimeout(() => {
+                            isTyping = false;
+                            fetch('/api/typing', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ peer_ip: currentChat.value.ip, typing: false })
+                            }).catch(() => {});
+                        }, 2000);
+                    }
+                };
 
-            try {
-                const res = await fetch('/api/group/create', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: name, announcement: ann })
-                });
-                const data = await res.json();
-                if (data.ok) {
-                    closeCreateGroupModal();
-                    await fetchGroups();
-                    switchTab('groups');
-                    selectChat({ type: 'group', id: data.qgroup_id, name: name });
-                }
-            } catch (e) {
-                console.error("Failed creating group", e);
-            }
-        }
+                // 6. 模态框操作
+                const submitCreateGroup = async () => {
+                    const name = newGroup.name.trim();
+                    const ann = newGroup.announcement.trim();
+                    if (!name) return;
 
-        async function syncNativeNwt() {
-            const btn = document.getElementById('btnSyncNative');
-            if (btn) btn.textContent = '正在同步...';
-            try {
-                const res = await fetch('/api/native/import', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ sync_subnets: true, sync_groups: true, sync_shares: true, apply_identity: false })
-                });
-                const data = await res.json();
-                if (data.ok && data.result.installed) {
-                    const r = data.result;
-                    alert(`原生内网通数据同步成功！\n- 账号: ${r.account || '未配置'}\n- 讨论组: 导入 ${r.groups_imported} 个\n- 共享文件: 导入 ${r.shares_imported} 个\n- 网段扫描: 同步 ${r.subnets.length} 个网段`);
-                    await fetchGroups();
-                    await fetchFiles();
+                    try {
+                        const res = await fetch('/api/group/create', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ name: name, announcement: ann })
+                        });
+                        const data = await res.json();
+                        if (data.ok) {
+                            showCreateGroupModal.value = false;
+                            newGroup.name = '';
+                            newGroup.announcement = '';
+                            await fetchGroups();
+                            switchTab('groups');
+                            selectChat({ type: 'group', id: data.qgroup_id, name: name });
+                        }
+                    } catch (e) {
+                        console.error('Failed creating group', e);
+                    }
+                };
+
+                const syncNativeNwt = async () => {
+                    isSyncing.value = true;
+                    try {
+                        const res = await fetch('/api/native/import', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                sync_subnets: true,
+                                sync_groups: true,
+                                sync_shares: true,
+                                apply_identity: false
+                            })
+                        });
+                        const data = await res.json();
+                        if (data.ok && data.result.installed) {
+                            const r = data.result;
+                            alert(`原生内网通数据同步成功！\n- 账号: ${r.account || '未配置'}\n- 讨论组: 导入 ${r.groups_imported} 个\n- 共享文件: 导入 ${r.shares_imported} 个\n- 网段扫描: 同步 ${r.subnets.length} 个网段`);
+                            await fetchGroups();
+                            await fetchFiles();
+                            await fetchContacts();
+                        } else if (data.ok && !data.result.installed) {
+                            alert('未检测到原生内网通默认安装目录 (C:\\Users\\Public\\Nwt)');
+                        } else {
+                            alert('同步失败: ' + (data.error || '未知错误'));
+                        }
+                    } catch (err) {
+                        alert('同步请求失败: ' + err);
+                    } finally {
+                        isSyncing.value = false;
+                    }
+                };
+
+                // 7. WebSocket 实时事件流
+                const setupWebSocket = () => {
+                    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+                    ws.onmessage = (e) => {
+                        try {
+                            const event = JSON.parse(e.data);
+                            handleWsEvent(event);
+                        } catch (err) {
+                            console.error('Invalid WS payload', err);
+                        }
+                    };
+
+                    ws.onclose = () => {
+                        setTimeout(setupWebSocket, 3000);
+                    };
+                };
+
+                const handleWsEvent = (evt) => {
+                    const type = evt.event;
+                    const d = evt.data || {};
+
+                    if (type === 'message') {
+                        messages.value.push({
+                            msg_id: d.msg_id,
+                            type: 'peer',
+                            sender_id: d.sender_id,
+                            recipient_id: d.recipient_id,
+                            text: d.text,
+                            timestamp: d.timestamp,
+                            is_image: d.is_image,
+                            image_md5: d.image_md5,
+                            is_self: false,
+                            recalled: false,
+                        });
+                        scrollToBottom();
+                    } else if (type === 'group_message') {
+                        messages.value.push({
+                            msg_id: d.msg_id,
+                            type: 'group',
+                            sender_id: d.sender_id,
+                            sender_name: d.sender_name,
+                            qgroup_id: d.qgroup_id,
+                            text: d.text,
+                            timestamp: d.timestamp,
+                            is_image: d.is_image,
+                            image_md5: d.image_md5,
+                            is_self: false,
+                            recalled: false,
+                        });
+                        scrollToBottom();
+                    } else if (type === 'contact_online') {
+                        fetchContacts();
+                    } else if (type === 'typing') {
+                        if (currentChat.value && currentChat.value.ip === d.peer_ip && d.is_typing) {
+                            typingText.value = '对方正在输入中...';
+                            clearTimeout(typingTimeout);
+                            typingTimeout = setTimeout(() => { typingText.value = ''; }, 3000);
+                        } else {
+                            typingText.value = '';
+                        }
+                    } else if (type === 'recall') {
+                        const m = messages.value.find(x => x.msg_id === d.target_msg_id || x.uuid === d.target_uuid);
+                        if (m) {
+                            m.recalled = true;
+                        }
+                    } else if (['group_invite', 'group_member_change', 'group_dismiss'].includes(type)) {
+                        fetchGroups();
+                    } else if (type === 'group_file_shared') {
+                        fetchFiles();
+                    }
+                };
+
+                // 8. 挂载初始化
+                onMounted(async () => {
+                    await fetchStatus();
                     await fetchContacts();
-                } else if (data.ok && !data.result.installed) {
-                    alert('未检测到原生内网通默认安装目录 (C:\\Users\\Public\\Nwt)');
-                } else {
-                    alert('同步失败: ' + (data.error || '未知错误'));
-                }
-            } catch (err) {
-                alert('同步请求失败: ' + err);
-            } finally {
-                if (btn) btn.textContent = '同步原生内网通';
+                    await fetchGroups();
+                    setupWebSocket();
+                });
+
+                return {
+                    myInfo,
+                    currentTab,
+                    searchQuery,
+                    contacts,
+                    groups,
+                    sharedFiles,
+                    currentChat,
+                    inputMessage,
+                    typingText,
+                    isSyncing,
+                    showCreateGroupModal,
+                    newGroup,
+                    messagesContainerRef,
+                    myStatusText,
+                    myStatusClass,
+                    filteredContacts,
+                    filteredGroups,
+                    currentMessages,
+                    formatTime,
+                    openImage,
+                    switchTab,
+                    selectChat,
+                    sendMessage,
+                    recallMessage,
+                    sendShake,
+                    triggerFileShare,
+                    onInputKeydown,
+                    submitCreateGroup,
+                    syncNativeNwt,
+                };
             }
-        }
-
-        function escapeHtml(str) {
-            if (!str) return '';
-            return String(str)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;');
-        }
-
-        window.onload = init;
+        }).mount('#app');
     </script>
 </body>
 </html>
