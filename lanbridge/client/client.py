@@ -110,6 +110,33 @@ from lanbridge.protocol import (
 logger = logging.getLogger("lanbridge.client")
 
 
+def get_or_create_device_id() -> str:
+    """Retrieve or generate a persistent 32-hex device ID for this node.
+
+    Checks ~/.lanbridge/device_id. If missing or invalid, generates a new
+    random 32-char hexadecimal string (via uuid4) and persists it.
+    """
+    cfg_dir = os.path.expanduser(os.path.join("~", ".lanbridge"))
+    id_file = os.path.join(cfg_dir, "device_id")
+    try:
+        if os.path.isfile(id_file):
+            with open(id_file, "r", encoding="ascii") as f:
+                val = f.read().strip()
+                if len(val) == 32 and all(c in "0123456789abcdefABCDEF" for c in val):
+                    return val.lower()
+    except Exception:
+        pass
+
+    new_id = uuid.uuid4().hex.lower()
+    try:
+        os.makedirs(cfg_dir, exist_ok=True)
+        with open(id_file, "w", encoding="ascii") as f:
+            f.write(new_id)
+    except Exception:
+        pass
+    return new_id
+
+
 class LanBridgeClient:
     """Asynchronous client for NeiWangTong (Nwt 3.4.3055) compatibility."""
 
@@ -117,9 +144,11 @@ class LanBridgeClient:
         self,
         local_ip: Optional[str] = None,
         broadcast_ip: Optional[Union[str, List[str]]] = None,
-        user_id: str = DEFAULT_USER_ID,
+        user_id: Optional[str] = None,
         nickname: str = DEFAULT_NICKNAME,
         group: str = DEFAULT_GROUP,
+        corp_id: str = "296becfde55172409ef2b81908044747",
+        signature: str = "LanBridge Native Online",
         discovery_port: int = 9011,
         main_port: int = 9012,
         dynamic_port: int = 53782,
@@ -152,7 +181,7 @@ class LanBridgeClient:
             self.broadcast_ip = broadcast_ip
 
         self.auto_scan_on_start = auto_scan_on_start
-        self.user_id = user_id
+        self.user_id = user_id if user_id else get_or_create_device_id()
         self.nickname = nickname
         self.group = group
         self.guid = DEFAULT_GUID
@@ -178,16 +207,14 @@ class LanBridgeClient:
         self.group_shared_files: Dict[str, Dict[str, GroupSharedFile]] = {}  # qgroup_id -> {md5: GroupSharedFile}
         self.local_shared_files: Dict[str, GroupSharedFile] = {}  # md5 -> GroupSharedFile
         self.status: int = 0
-        self.signature: str = ""
-        self.corp_id: str = "296becfde55172409ef2b81908044747"
+        self.signature: str = signature
+        self.corp_id: str = corp_id
+        self._native_subnets: List[str] = []
         self.native_adapter: Optional[NativeNwtAdapter] = None
         if NativeNwtAdapter.is_installed():
             self.native_adapter = NativeNwtAdapter()
             try:
                 self._native_subnets = self.native_adapter.read_network_config().get("subnets", [])
-                opts = self.native_adapter.read_user_options()
-                if opts.get("corp_id"):
-                    self.corp_id = opts["corp_id"]
             except Exception:
                 pass
 
@@ -1608,7 +1635,7 @@ class LanBridgeClient:
                 nick=self.nickname,
                 group=self.group,
                 user_id=self.user_id,
-                use_shiyeline_prefix=False,
+                use_shiyeline_prefix=True,
             )
             sock2425 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock2425.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -1652,7 +1679,7 @@ class LanBridgeClient:
                 nick=self.nickname,
                 group=self.group,
                 user_id=self.user_id,
-                use_shiyeline_prefix=False,
+                use_shiyeline_prefix=True,
             )
             sock2425 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock2425.sendto(ipmsg_pkt, (peer_ip, 2425))

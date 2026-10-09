@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""Tests for device identity, persistent UID generation, IPMSG shiyeline suppression, and group config."""
+
+import os
+import shutil
+import tempfile
+import socket
+import unittest
+from unittest.mock import MagicMock, patch
+
+from lanbridge.client.client import LanBridgeClient, get_or_create_device_id
+from lanbridge.protocol.discovery import build_ipmsg_presence
+from lanbridge.protocol.messages import build_native_profile
+from lanbridge.protocol import DEFAULT_GROUP
+from lanbridge.__main__ import build_parser
+
+
+class TestDeviceIdentityAndGrouping(unittest.IsolatedAsyncioTestCase):
+    """Test device UID persistence, presence formatting and group naming."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_get_or_create_device_id_generates_and_persists(self):
+        fake_cfg_dir = os.path.join(self.temp_dir, ".lanbridge")
+        fake_id_file = os.path.join(fake_cfg_dir, "device_id")
+
+        with patch("os.path.expanduser", return_value=fake_cfg_dir):
+            uid1 = get_or_create_device_id()
+            self.assertEqual(len(uid1), 32)
+            self.assertTrue(all(c in "0123456789abcdef" for c in uid1))
+            self.assertTrue(os.path.isfile(fake_id_file))
+
+            # Second call should read existing file
+            uid2 = get_or_create_device_id()
+            self.assertEqual(uid1, uid2)
+
+    def test_lanbridge_client_defaults(self):
+        client = LanBridgeClient(auto_scan_on_start=False)
+        self.assertEqual(len(client.user_id), 32)
+        self.assertEqual(client.group, "未分组联系人")
+        self.assertEqual(DEFAULT_GROUP, "未分组联系人")
+        self.assertEqual(client.signature, "LanBridge Native Online")
+        self.assertTrue(hasattr(client, "corp_id"))
+        self.assertTrue(hasattr(client, "_native_subnets"))
+
+    def test_lanbridge_client_custom_group_and_corp_id(self):
+        custom_group = "产品研发部"
+        custom_corp = "11223344556677889900aabbccddeeff"
+        custom_uid = "0102030405060708090a0b0c0d0e0f10"
+        client = LanBridgeClient(
+            user_id=custom_uid,
+            group=custom_group,
+            corp_id=custom_corp,
+            signature="Busy",
+            auto_scan_on_start=False,
+        )
+        self.assertEqual(client.user_id, custom_uid)
+        self.assertEqual(client.group, custom_group)
+        self.assertEqual(client.corp_id, custom_corp)
+        self.assertEqual(client.signature, "Busy")
+
+    def test_ipmsg_presence_has_shiyeline_prefix_and_uid(self):
+        pkt = build_ipmsg_presence(
+            nick="Android-Phone",
+            group="未分组联系人",
+            user_id="1234567890abcdef1234567890abcdef",
+            use_shiyeline_prefix=True,
+        )
+        self.assertTrue(pkt.startswith(b"1@shiyeline:"))
+        text = pkt.decode("gbk", errors="ignore")
+        self.assertIn("Android-Phone", text)
+        self.assertIn("未分组联系人", text)
+        self.assertIn("1234567890abcdef1234567890abcdef", text)
+
+    async def test_broadcast_presence_uses_shiyeline_prefix(self):
+        client = LanBridgeClient(
+            user_id="abcdef0123456789abcdef0123456789",
+            nickname="TestPhone",
+            group="未分组联系人",
+            broadcast_ip="127.0.0.1",
+            auto_scan_on_start=False,
+        )
+        client._udp_9011_transport = MagicMock()
+
+        real_socket = socket.socket
+        mock_sock = MagicMock()
+
+        def socket_side_effect(*args, **kwargs):
+            if args and len(args) >= 2 and args[0] == socket.AF_INET and args[1] == socket.SOCK_DGRAM:
+                return mock_sock
+            return real_socket(*args, **kwargs)
+
+        with patch("socket.socket", side_effect=socket_side_effect):
+            await client.broadcast_presence()
+
+            # Ensure sendto was called on 2425 port with 1@shiyeline:
+            calls = mock_sock.sendto.call_args_list
+            self.assertTrue(len(calls) > 0)
+            sent_data, addr = calls[0][0]
+            self.assertEqual(addr[1], 2425)
+            self.assertTrue(sent_data.startswith(b"1@shiyeline:"))
+            sent_text = sent_data.decode("gbk", errors="ignore")
+            self.assertIn("abcdef0123456789abcdef0123456789", sent_text)
+            self.assertIn("未分组联系人", sent_text)
+
+    def test_build_native_profile_group_xml(self):
+        # Default group
+        profile_bytes = build_native_profile(nick="PhoneBot")
+        from lanbridge.protocol.crypto import XteaEngine
+        xtea = XteaEngine()
+        op, xml = xtea.parse_envelope(profile_bytes)
+        self.assertEqual(op, 0x03E8)
+        self.assertIn("<GROUP>未分组联系人</GROUP>", xml.decode("utf-8"))
+
+        # Custom group
+        custom_bytes = build_native_profile(nick="PhoneBot", group="行政部门")
+        op2, xml2 = xtea.parse_envelope(custom_bytes)
+        self.assertEqual(op2, 0x03E8)
+        self.assertIn("<GROUP>行政部门</GROUP>", xml2.decode("utf-8"))
+
+    def test_cli_parser_options(self):
+        parser = build_parser()
+        args = parser.parse_args([
+            "--group", "技术支持组",
+            "--corp-id", "99887766554433221100aabbccddeeff",
+            "--signature", "在线测试中",
+        ])
+        self.assertEqual(args.group, "技术支持组")
+        self.assertEqual(args.corp_id, "99887766554433221100aabbccddeeff")
+        self.assertEqual(args.signature, "在线测试中")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -18,7 +18,7 @@ DEFAULT_VERSION = b"#3#4#4"
 DEFAULT_USER_ID = "2158b475dfcfdd43989482c4dcf0337b"
 DEFAULT_GUID = bytes.fromhex("92f64910243444458df4dc184a44ba7c")
 DEFAULT_NICKNAME = "LanBridge-Bot"
-DEFAULT_GROUP = "内网通联系人"
+DEFAULT_GROUP = "未分组联系人"
 
 
 def build_nwt_discovery_packet(

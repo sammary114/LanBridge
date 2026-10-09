@@ -33,6 +33,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", "--web-port", type=int, default=8080, dest="port", help="Web gateway HTTP port (default: 8080)")
     parser.add_argument("--nickname", default="LanBridge-Bot", help="Local nickname")
     parser.add_argument("--user-id", default=None, help="Local user ID (hex MD5)")
+    parser.add_argument("--group", default="未分组联系人", help="Contact group or unit/organization name (default: 未分组联系人)")
+    parser.add_argument("--corp-id", default=None, help="Organization / Corporation ID (hex MD5)")
+    parser.add_argument("--signature", default="LanBridge Native Online", help="Personal status signature")
     parser.add_argument("--broadcast", default=None, help="Subnet broadcast IP (e.g. 192.168.1.255)")
     parser.add_argument("--import-native", action="store_true", help="Auto import config, groups, and shares from native Nwt installation")
     parser.add_argument("--native-dir", default=None, help="Path to native Nwt directory (default: C:\\Users\\Public\\Nwt)")
@@ -50,10 +53,14 @@ async def main_async() -> None:
 
     client_kwargs = {
         "nickname": args.nickname,
+        "group": args.group,
+        "signature": args.signature,
         "auto_scan_on_start": not args.web_only,
     }
     if args.user_id:
         client_kwargs["user_id"] = args.user_id
+    if args.corp_id:
+        client_kwargs["corp_id"] = args.corp_id
     if args.broadcast:
         client_kwargs["broadcast_ip"] = args.broadcast
 

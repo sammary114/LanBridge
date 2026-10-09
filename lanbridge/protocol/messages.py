@@ -29,7 +29,7 @@ _xtea = XteaEngine()
 
 DEFAULT_USER_ID = "2158b475dfcfdd43989482c4dcf0337b"
 DEFAULT_NICKNAME = "LanBridge-Bot"
-DEFAULT_GROUP = "内网通联系人"
+DEFAULT_GROUP = "未分组联系人"
 
 
 class Opcode:
@@ -81,7 +81,7 @@ def build_native_profile(
     corp_id: str = "296becfde55172409ef2b81908044747",
     status: int = 0,
     sign: str = "LanBridge Native Online",
-    group: str = "Default",
+    group: str = DEFAULT_GROUP,
     tcp_file_port: int = 9013,
 ) -> bytes:
     """Build authentic encrypted X_HANDSHARK profile envelope."""

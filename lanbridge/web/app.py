@@ -292,6 +292,7 @@ class WebGateway:
             "user_id": self.client.user_id,
             "nickname": self.client.nickname,
             "group": self.client.group,
+            "corp_id": self.client.corp_id,
             "status": self.client.status,
             "signature": self.client.signature,
             "local_ip": self.client.local_ip,
