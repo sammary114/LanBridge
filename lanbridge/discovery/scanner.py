@@ -87,11 +87,18 @@ class SubnetScanner:
             guid=DEFAULT_GUID,
         )
 
+        send_done = asyncio.Event()
+
         async def listener():
-            end_time = time.time() + self.listen_timeout + (len(target_ips) * self.rate_limit_delay)
-            while time.time() < end_time:
+            linger_end: Optional[float] = None
+            while True:
+                if send_done.is_set():
+                    if linger_end is None:
+                        linger_end = time.time() + self.listen_timeout
+                    elif time.time() >= linger_end:
+                        break
                 try:
-                    data, addr = await asyncio.wait_for(loop.sock_recvfrom(sock, 1024), timeout=0.1)
+                    data, addr = await asyncio.wait_for(loop.sock_recvfrom(sock, 2048), timeout=0.05)
                     parsed = parse_discovery_packet(data)
                     if parsed and parsed.get("user_id") != self.local_user_id:
                         peer_ip, _ = addr
@@ -110,17 +117,27 @@ class SubnetScanner:
                             logger.info("[SCANNER] Discovered peer at %s (UID: %s)", peer_ip, uid)
                 except asyncio.TimeoutError:
                     continue
+                except (ConnectionResetError, BlockingIOError, OSError):
+                    # Gracefully ignore Windows WSAECONNRESET (10054) caused by ICMP unreachables
+                    continue
                 except Exception as e:
+                    logger.debug("[SCANNER] Listener exception: %s", e)
                     break
 
         async def sender():
-            for ip in target_ips:
-                try:
-                    sock.sendto(disc_pkt, (ip, self.discovery_port))
-                except Exception as e:
-                    logger.debug("Failed sending probe to %s: %s", ip, e)
-                if self.rate_limit_delay > 0:
-                    await asyncio.sleep(self.rate_limit_delay)
+            try:
+                for idx, ip in enumerate(target_ips):
+                    for attempt in range(5):
+                        try:
+                            sock.sendto(disc_pkt, (ip, self.discovery_port))
+                            break
+                        except (BlockingIOError, OSError):
+                            await asyncio.sleep(0.005)
+                    if (idx + 1) % 15 == 0:
+                        delay = max(self.rate_limit_delay, 0.005)
+                        await asyncio.sleep(delay)
+            finally:
+                send_done.set()
 
         listen_task = asyncio.create_task(listener())
         send_task = asyncio.create_task(sender())

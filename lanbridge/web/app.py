@@ -68,6 +68,7 @@ class WebGateway:
         self.app.router.add_post("/api/recall", self.handle_post_recall)
         self.app.router.add_post("/api/status", self.handle_post_status)
         self.app.router.add_post("/api/share_file", self.handle_post_share_file)
+        self.app.router.add_post("/api/scan", self.handle_post_scan)
 
         static_dir = os.path.join(os.path.dirname(__file__), "static")
         if os.path.isdir(static_dir):
@@ -505,6 +506,32 @@ class WebGateway:
             return web.json_response({"ok": False, "error": "Invalid qgroup_id or file_path"}, status=400)
         gsf = await self.client.share_file_to_group(qgroup_id, file_path)
         return web.json_response({"ok": True, "file_md5": gsf.file_md5})
+
+    async def handle_post_scan(self, request: web.Request) -> web.Response:
+        data = {}
+        if request.can_read_body:
+            try:
+                data = await request.json()
+            except Exception:
+                data = {}
+        targets = data.get("targets") if isinstance(data, dict) else None
+        discovered = await self.client.scan_subnets(targets)
+        for c in discovered:
+            self._on_contact_online(c)
+        return web.json_response({
+            "ok": True,
+            "count": len(discovered),
+            "contacts": [
+                {
+                    "user_id": c.user_id,
+                    "nickname": c.nickname,
+                    "ip": c.ip,
+                    "port": c.port,
+                    "status": c.status,
+                }
+                for c in discovered
+            ],
+        })
 
 
 def create_app(client: LanBridgeClient) -> web.Application:

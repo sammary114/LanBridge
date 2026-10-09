@@ -327,6 +327,15 @@ class LanBridgeClient:
     # Core Protocol Handlers
     # -------------------------------------------------------------------------
 
+    def _resolve_nickname_from_groups(self, user_id: str) -> Optional[str]:
+        """Look up known nickname for a user ID from loaded QGroups."""
+        for qg in self.qgroups.values():
+            if user_id in qg.members:
+                nick = qg.members[user_id]
+                if nick and nick != user_id:
+                    return nick
+        return None
+
     def handle_discovery_packet(self, data: bytes, addr: Tuple[str, int]) -> Optional[bytes]:
         """Process UDP 9011 discovery packets."""
         parsed = parse_discovery_packet(data)
@@ -350,10 +359,15 @@ class LanBridgeClient:
         contact.status = 0
         contact.last_seen = time.time()
 
+        if contact.nickname in ("Unknown", "", None):
+            known_nick = self._resolve_nickname_from_groups(peer_uid)
+            if known_nick:
+                contact.nickname = known_nick
+
         if is_new:
-            logger.info("Discovered new contact: UID=%s, IP=%s, DynPort=%d", peer_uid, peer_ip, dyn_port)
+            logger.info("Discovered new contact: UID=%s (%s), IP=%s, DynPort=%d", peer_uid, contact.nickname, peer_ip, dyn_port)
             self.emit_contact_online(contact)
-            if self._loop and self._loop.is_running():
+            if self._loop and self._loop.is_running() and self._udp_9012_transport:
                 t = asyncio.create_task(self._proactive_connect(peer_ip))
                 self._bg_tasks.append(t)
 
@@ -1430,14 +1444,11 @@ class LanBridgeClient:
             except Exception as e:
                 logger.debug("Failed sending proactive connect to %s: %s", peer_ip, e)
 
-    async def _auto_subnet_scan_task(self) -> None:
-        """Asynchronously scan local subnets on startup to discover Nwt instances."""
-        try:
-            await asyncio.sleep(0.1)
-            await self.broadcast_presence()
-
+    async def scan_subnets(self, targets: Optional[List[str]] = None) -> List[Contact]:
+        """Actively scan local/cross subnets to discover online peers and update contacts directory."""
+        if targets is None:
+            targets = []
             interfaces = get_active_network_interfaces()
-            targets: List[str] = []
             for iface in interfaces:
                 try:
                     net24 = ipaddress.ip_network(f"{iface.ip}/24", strict=False)
@@ -1449,21 +1460,54 @@ class LanBridgeClient:
                 if s not in targets:
                     targets.append(s)
 
-            if targets:
-                logger.info("Initiating auto subnet scan across: %s", targets)
-                scanner = SubnetScanner(
-                    local_user_id=self.user_id,
-                    discovery_port=self.discovery_port,
-                    listen_timeout=1.0,
-                    rate_limit_delay=0.001,
-                )
-                discovered = await scanner.scan(targets, bind_ip="0.0.0.0")
-                for contact in discovered:
-                    if contact.user_id not in self.contacts and contact.user_id != self.user_id:
-                        self.contacts[contact.user_id] = contact
-                        self.emit_contact_online(contact)
-                        logger.info("Auto-scan discovered peer: UID=%s, IP=%s", contact.user_id, contact.ip)
-                        await self._proactive_connect(contact.ip)
+        if not targets:
+            return []
+
+        logger.info("Initiating active subnet scan across: %s", targets)
+        scanner = SubnetScanner(
+            local_user_id=self.user_id,
+            discovery_port=self.discovery_port,
+            listen_timeout=1.2,
+            rate_limit_delay=0.002,
+        )
+        discovered = await scanner.scan(targets, bind_ip="0.0.0.0")
+
+        for contact in discovered:
+            if contact.user_id == self.user_id:
+                continue
+
+            # Populate nickname from known discussion groups if unknown
+            if contact.nickname in ("Unknown", "", None):
+                known_nick = self._resolve_nickname_from_groups(contact.user_id)
+                if known_nick:
+                    contact.nickname = known_nick
+
+            existing = self.contacts.get(contact.user_id)
+            if existing:
+                existing.ip = contact.ip
+                existing.port = contact.port
+                existing.dynamic_port = contact.dynamic_port
+                existing.status = 0
+                existing.last_seen = time.time()
+                if existing.nickname in ("Unknown", "", None) and contact.nickname not in ("Unknown", "", None):
+                    existing.nickname = contact.nickname
+                contact = existing
+            else:
+                self.contacts[contact.user_id] = contact
+                self.emit_contact_online(contact)
+
+            logger.info("Subnet scan peer online: UID=%s (%s), IP=%s", contact.user_id, contact.nickname, contact.ip)
+            if self._loop and self._loop.is_running() and self._udp_9012_transport:
+                asyncio.create_task(self._proactive_connect(contact.ip))
+
+        return discovered
+
+    async def _auto_subnet_scan_task(self) -> None:
+        """Asynchronously scan local subnets on startup to discover Nwt instances."""
+        try:
+            await asyncio.sleep(0.1)
+            await self.broadcast_presence()
+            await self.scan_subnets()
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -1876,6 +1920,11 @@ class LanBridgeClient:
                     self.qgroups[gid] = qg
                 else:
                     self.qgroups[gid].members.update(qg.members)
+            for contact in self.contacts.values():
+                if contact.nickname in ("Unknown", "", None):
+                    nick = self._resolve_nickname_from_groups(contact.user_id)
+                    if nick:
+                        contact.nickname = nick
 
         # 4. Shares
         if sync_shares:

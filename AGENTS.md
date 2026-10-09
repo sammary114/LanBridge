@@ -267,7 +267,7 @@ ip.addr == 47.57.13.180 && tcp.port == 80
 - **零配置自驱动接入引擎（Zero-Touch Autonomous Integration & Group Chat）全面交付**：
   * **网卡自适应与定向多广播**：`lanbridge.discovery.network` 自动枚举活动物理/虚拟网卡（剥离 loopback 和 APIPA 169.254.x），向所有活动子网定向广播和 `255.255.255.255` 并发宣告上线，双方用户均无需手动查询 IP 或配置网段。
   * **开机静默单播穿透扫描与主动唤醒**：客户端开机后台异步驱动 `SubnetScanner` 并发单播探测本地 `/24` 所在网段，收到反馈立即主动发起 ENet Opcode 0x82 握手与 profile 推送，在对端联系人树上无感点亮在线绿标。
-- **自动化测试套件**：全量 **120 项自动化测试**（120/120 PASS），涵盖传输层、密码机、协议握手、文件引擎、群文件共享、跨网段探测、QGroup全套生命周期管理、Web 网关、Vue 3 离线单页客户端、CLI 增强与原生内网通目录数据适配。
+- **自动化测试套件**：全量 **121 项自动化测试**（121/121 PASS），涵盖传输层、密码机、协议握手、文件引擎、群文件共享、跨网段主动探测、QGroup全套生命周期管理、Web 网关、Vue 3 离线单页客户端、CLI 增强、原生内网通目录数据适配与在线主动扫描。
 - **M6 里程碑全面交付（全功能闭环与 Web 客户端/Bot 网关）**：
   * **多人讨论组/群聊全套生命周期管理**：完整逆向还原并实现原生 13 项群组命令字（建群、入群应答、群资料/公告推送、群成员变动、拉取成员、踢人、解散、退群）；
   * **聊天增强与状态机制**：实现原生输入中指示 `X_SEND_WRITTING`（Opcode 1008）、消息撤回机制 `recall`（原生 JSON type 6）、个人在线状态切换与个性签名广播；
@@ -279,4 +279,9 @@ ip.addr == 47.57.13.180 && tcp.port == 80
   * **讨论组与共享空间无感导入**：只读提取 `data/qrp`（SQLite `QGroupInfo_*` 与 `QGroupUser_*`，原生支持真实 Emoji 与 18+ 名成员映射）及 `cache/db/sd`（`ShareData_*` 共享元数据）；并在 Web UI 群聊中提供**群成员侧边面板**，实时呈现群成员在线/离线徽标、群主/自身标识与在线统计，支持点击成员一键发起 1 对 1 私聊；
   * **媒体缓存秒级命中与直接伺服**：复用 `cache/pic/`（356+ 张历史图片）与 `cache/recv/`，实现 Web UI 与 TCP `CFolderTranEngine` 图片秒开秒传（零网络开销）；
   * **全场景一键同步**：Web 端顶栏增加“同步原生内网通”与 `GET /api/native/status`、`POST /api/native/import`、`GET /api/images/{md5}`；CLI 增加 `--web-port`、`--web-only`（脱离底层端口冲突）、`--import-native`、`--native-dir` 与 `--adopt-identity` 启动选项。
+- **M8 全网段群成员主动探测与在线点亮引擎（Subnet Online Discovery & Lighting）全面交付**：
+  * **Winsock 10054 (WSAECONNRESET) 与非阻塞异常免疫**：在 `SubnetScanner` 监听器中彻底容错 ICMP Port/Host Unreachable 错误，并对发送端 `WSAEWOULDBLOCK` (10035) 实施微毫秒重试，杜绝探测报文丢弃；
+  * **生命周期同步与快速脉冲扫描**：采用 `asyncio.Event` 严格同步发送与监听器生命周期，支持 Linger 保活窗口与分批微休眠让渡，0.4 秒内平滑完成 760+ 跨网段并发探测；
+  * **讨论组成员与联系人双向智能映射**：发现探测节点后自动反查 `self.qgroups` 真实姓名（如自动将 UID 关联为 `VV`、`H4C`、`LQ-New`、`DD2号`），并自动向在线对端触发 ENet Opcode 0x82 建立连接；
+  * **Web 端全链路主动扫描与自驱动刷新**：实现 `POST /api/scan` REST 端点与 WebSocket 增量广播；Web UI 群成员面板新增“🔄 扫描在线”按钮，且在切换至讨论组时自动触发背景探测，实时点亮绿色在线徽标与真实 IP。
 

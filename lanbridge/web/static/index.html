@@ -988,8 +988,19 @@
                     class="group-members-sidebar"
                 >
                     <div class="members-sidebar-header">
-                        <span class="members-header-title">群成员 ({{ currentGroupMembers.length }})</span>
-                        <span class="members-header-count">{{ currentGroupOnlineCount }} 在线</span>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span class="members-header-title">群成员 ({{ currentGroupMembers.length }})</span>
+                            <span class="members-header-count">{{ currentGroupOnlineCount }} 在线</span>
+                        </div>
+                        <button
+                            class="btn-action"
+                            :disabled="isScanning"
+                            @click="triggerActiveScan(true)"
+                            style="padding: 3px 8px; font-size: 11px; margin-left: auto;"
+                            title="主动扫描跨网段群成员在线状态"
+                        >
+                            {{ isScanning ? '🔄 扫描中...' : '🔄 扫描在线' }}
+                        </button>
                     </div>
                     <div class="members-search-box">
                         <input
@@ -1148,6 +1159,12 @@
                         } else if (contact) {
                             status = contact.status;
                             ip = contact.ip || '';
+                        } else if (grp.members_detail) {
+                            const md = grp.members_detail.find(m => m.user_id === uid);
+                            if (md) {
+                                status = md.status;
+                                ip = md.ip || '';
+                            }
                         }
 
                         list.push({
@@ -1275,6 +1292,11 @@
                     currentChat.value = chat;
                     typingText.value = '';
                     scrollToBottom();
+                    if (chat && chat.type === 'group') {
+                        if (Date.now() - lastScanTime > 30000) {
+                            triggerActiveScan(false);
+                        }
+                    }
                 };
 
                 // 5. 消息收发与撤回
@@ -1442,6 +1464,34 @@
                     }
                 };
 
+                const isScanning = ref(false);
+                let lastScanTime = 0;
+
+                const triggerActiveScan = async (showAlert = false) => {
+                    if (isScanning.value) return;
+                    isScanning.value = true;
+                    try {
+                        const res = await fetch('/api/scan', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({})
+                        });
+                        const data = await res.json();
+                        if (data.ok) {
+                            lastScanTime = Date.now();
+                            await fetchContacts();
+                            await fetchGroups();
+                            if (showAlert) {
+                                alert(`局域网/跨网段在线扫描完成！\n- 发现在线端点: ${data.count || 0} 个`);
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Failed triggering subnet scan', e);
+                    } finally {
+                        isScanning.value = false;
+                    }
+                };
+
                 // 7. WebSocket 实时事件流
                 const setupWebSocket = () => {
                     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -1560,6 +1610,8 @@
                     currentGroupOnlineCount,
                     filteredGroupMembers,
                     startPrivateChatWithMember,
+                    isScanning,
+                    triggerActiveScan,
                 };
             }
         }).mount('#app');

@@ -162,6 +162,16 @@ class TestWebGateway(AioHTTPTestCase):
         self.assertIn("Vue", text)
         self.assertTrue(len(text) > 50000)
 
+    @unittest_run_loop
+    async def test_post_scan_endpoint(self):
+        """Test POST /api/scan triggers scan_subnets and returns results."""
+        resp = await self.client.post("/api/scan", json={"targets": ["127.0.0.1"]})
+        self.assertEqual(resp.status, 200)
+        data = await resp.json()
+        self.assertTrue(data["ok"])
+        self.assertIn("count", data)
+        self.assertIn("contacts", data)
+
 
 
 if __name__ == "__main__":
