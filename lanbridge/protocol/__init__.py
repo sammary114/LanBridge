@@ -40,6 +40,8 @@ from lanbridge.protocol.handshake import (
     build_opcode_84,
     build_opcode_8a,
     build_opcode_88_fragments,
+    build_stage4_node_announcement,
+    build_x_ready_frame,
     build_multi_ack_response,
     build_ack_response,
 )
@@ -139,6 +141,8 @@ __all__ = [
     "build_opcode_84",
     "build_opcode_8a",
     "build_opcode_88_fragments",
+    "build_stage4_node_announcement",
+    "build_x_ready_frame",
     "build_multi_ack_response",
     "build_ack_response",
     "Opcode",

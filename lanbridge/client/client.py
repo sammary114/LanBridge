@@ -58,10 +58,13 @@ from lanbridge.protocol import (
     build_minifile_response,
     build_native_profile,
     build_nwt_discovery_packet,
+    build_ipmsg_presence,
     build_opcode_01,
     build_opcode_84,
     build_opcode_88_fragments,
     build_opcode_8a,
+    build_stage4_node_announcement,
+    build_x_ready_frame,
     build_x_change_sign_envelope,
     build_x_change_status_envelope,
     build_x_flash_screen_envelope,
@@ -176,11 +179,15 @@ class LanBridgeClient:
         self.local_shared_files: Dict[str, GroupSharedFile] = {}  # md5 -> GroupSharedFile
         self.status: int = 0
         self.signature: str = ""
+        self.corp_id: str = "296becfde55172409ef2b81908044747"
         self.native_adapter: Optional[NativeNwtAdapter] = None
         if NativeNwtAdapter.is_installed():
             self.native_adapter = NativeNwtAdapter()
             try:
                 self._native_subnets = self.native_adapter.read_network_config().get("subnets", [])
+                opts = self.native_adapter.read_user_options()
+                if opts.get("corp_id"):
+                    self.corp_id = opts["corp_id"]
             except Exception:
                 pass
 
@@ -384,6 +391,11 @@ class LanBridgeClient:
             if self._loop and self._loop.is_running() and self._udp_9012_transport:
                 t = asyncio.create_task(self._proactive_connect(peer_ip))
                 self._bg_tasks.append(t)
+        else:
+            session = self.get_session(peer_ip)
+            if not session.connected and self._loop and self._loop.is_running() and self._udp_9012_transport:
+                t = asyncio.create_task(self._proactive_connect(peer_ip))
+                self._bg_tasks.append(t)
 
         # Reply with DiscoveryReply (cmd 2)
         if parsed["cmd"] == 1:
@@ -406,45 +418,117 @@ class LanBridgeClient:
         peer_ip, peer_port = addr
         session = self.get_session(peer_ip)
 
-        hdr_type = data[0]
-        opcode = data[4]
-        seq = int.from_bytes(data[2:4], "big")
+        h_val = int.from_bytes(data[:2], "big")
+        has_sent_time = bool(h_val & 0x8000)
+        cmd_offset = 4 if has_sent_time else 2
+
+        if len(data) < cmd_offset + 4:
+            return replies
+
+        if has_sent_time:
+            remote_sent_time = int.from_bytes(data[2:4], "big")
+            session.last_remote_sent_time = remote_sent_time
+
+        if session.peer_id == 0 and (h_val & 0x0FFF) != 0x0FFF:
+            session.peer_id = h_val & 0x0FFF
+            session.session_id = (h_val >> 12) & 3
+
+        ack_hdr_val = ((session.session_id & 3) << 12) | (session.peer_id & 0x0FFF)
+        opcode = data[cmd_offset]
 
         # 1. Opcode 0x82 Connect Request from peer
         if opcode == 0x82:
+            if len(data) >= cmd_offset + 8:
+                out_peer, in_sess, out_sess = struct.unpack(">HBB", data[cmd_offset + 4 : cmd_offset + 8])
+                session.peer_id = out_peer
+                session.session_id = in_sess
             reply_83 = build_handshake_reply(data)
             replies.append(reply_83)
             return replies
 
         # 2. Opcode 0x83 Verify Connect / Reply
         if opcode == 0x83:
-            sync_01 = build_opcode_01(data[2:4])
-            replies.append(sync_01)
+            if len(data) >= cmd_offset + 8:
+                out_peer, in_sess, out_sess = struct.unpack(">HBB", data[cmd_offset + 4 : cmd_offset + 8])
+                session.peer_id = out_peer
+                session.session_id = in_sess
+                session.connected = True
+
+            header_flag = session.get_header_flag()
+
+            # Step 4: Frame 11 (ACK + PING)
+            my_time = session.local_sent_time = (session.local_sent_time + 10) & 0xFFFF
+            cmd_ack = struct.pack(">BBHHH", 0x01, 0xFF, 0x0001, 0x0001, session.last_remote_sent_time)
+            cmd_ping = struct.pack(">BBH", 0x85, 0xFF, 0x0002)
+            frame11 = struct.pack(">HH", header_flag, my_time) + cmd_ack + cmd_ping
+            replies.append(frame11)
+
+            # Step 6: Frame 17 (304B Node Discovery Announcement with cmd=4)
+            my_time = session.local_sent_time = (session.local_sent_time + 10) & 0xFFFF
+            frame17 = build_stage4_node_announcement(
+                user_id=self.user_id,
+                dynamic_port=self.dynamic_port,
+                header_flag=header_flag,
+                seq=my_time,
+                my_seq=1,
+            )
+            replies.append(frame17)
+
+            # Step 8: Stage 5 Profile Fragments (Opcode 0x88)
             profile_env = build_native_profile(
                 nick=self.nickname,
                 user_id=self.user_id,
+                corp_id=self.corp_id,
+                status=self.status,
+                sign=self.signature,
+                group=self.group,
                 tcp_file_port=self.tcp_file_port,
             )
-            frags = build_opcode_88_fragments(profile_env)
+            my_time = session.local_sent_time = (session.local_sent_time + 10) & 0xFFFF
+            frags = build_opcode_88_fragments(
+                profile_env,
+                seq=my_time,
+                header_flag=header_flag,
+            )
+            session.local_sent_time = (session.local_sent_time + len(frags)) & 0xFFFF
             replies.extend(frags)
             return replies
 
         # 3. Opcode 0x85 Heartbeat Ping
         if opcode == 0x85:
-            ack = build_ack_response(data)
+            ack = build_ack_response(data, header_flag=ack_hdr_val)
             if ack:
                 replies.append(ack)
+            for c in self.contacts.values():
+                if c.ip == peer_ip:
+                    c.last_seen = time.time()
+                    if c.status != 0:
+                        c.status = 0
+                        self.emit_contact_online(c)
+                    break
             return replies
 
         # 4. Opcode 0x86 Single Frame (Ready, Envelope, Typing)
         if opcode == 0x86:
-            ack = build_ack_response(data)
+            ack = build_ack_response(data, header_flag=ack_hdr_val)
             if ack:
                 replies.append(ack)
 
-            if len(data) >= 16:
-                tot_len = int.from_bytes(data[8:10], "big")
-                enc_data = data[16 : 16 + tot_len]
+            for c in self.contacts.values():
+                if c.ip == peer_ip:
+                    c.last_seen = time.time()
+                    if c.status != 0:
+                        c.status = 0
+                        self.emit_contact_online(c)
+                    break
+
+            payload_start = cmd_offset + 4
+            if len(data) >= payload_start + 2:
+                d_len = int.from_bytes(data[payload_start : payload_start + 2], "big")
+                enc_data = data[payload_start + 2 : payload_start + 2 + d_len]
+                if len(enc_data) < 8 or (len(enc_data) >= 4 and int.from_bytes(enc_data[:4], "big") != d_len):
+                    if len(data) >= 16:
+                        enc_data = data[16 : 16 + d_len]
                 if len(enc_data) >= 8:
                     try:
                         inner_op, plaintext = self.xtea.parse_envelope(enc_data)
@@ -454,29 +538,33 @@ class LanBridgeClient:
             return replies
 
         # 5. Opcode 0x88 Multi-fragment Message
-        if opcode == 0x88 and len(data) >= 28:
-            ack = build_ack_response(data)
+        if opcode == 0x88 and len(data) >= cmd_offset + 24:
+            ack = build_ack_response(data, header_flag=ack_hdr_val)
             if ack:
                 replies.append(ack)
 
-            base_sub_id = int.from_bytes(data[8:10], "big")
-            chunk_len = int.from_bytes(data[10:12], "big")
-            tot_frags = int.from_bytes(data[12:16], "big")
-            frag_idx = int.from_bytes(data[16:20], "big")
-            tot_len = int.from_bytes(data[20:24], "big")
-            frag_payload = data[28 : 28 + chunk_len]
+            for c in self.contacts.values():
+                if c.ip == peer_ip:
+                    c.last_seen = time.time()
+                    if c.status != 0:
+                        c.status = 0
+                        self.emit_contact_online(c)
+                    break
+
+            frag_info_offset = cmd_offset + 4
+            base_sub_id = int.from_bytes(data[frag_info_offset : frag_info_offset + 2], "big")
+            chunk_len = int.from_bytes(data[frag_info_offset + 2 : frag_info_offset + 4], "big")
+            tot_frags = int.from_bytes(data[frag_info_offset + 4 : frag_info_offset + 8], "big")
+            frag_idx = int.from_bytes(data[frag_info_offset + 8 : frag_info_offset + 12], "big")
+            tot_len = int.from_bytes(data[frag_info_offset + 12 : frag_info_offset + 16], "big")
+            frag_payload = data[frag_info_offset + 20 : frag_info_offset + 20 + chunk_len]
 
             if base_sub_id not in session.assemblers:
-                session.assemblers[base_sub_id] = session.assemblers.get(
-                    base_sub_id, None
-                ) or session.assemblers.setdefault(
-                    base_sub_id,
-                    type(
-                        "Assembler",
-                        (),
-                        {"parts": {}, "count": tot_frags, "total_len": tot_len},
-                    )(),
-                )
+                session.assemblers[base_sub_id] = type(
+                    "Assembler",
+                    (),
+                    {"parts": {}, "count": tot_frags, "total_len": tot_len},
+                )()
             asm = session.assemblers[base_sub_id]
             asm.parts[frag_idx] = frag_payload
 
@@ -490,8 +578,15 @@ class LanBridgeClient:
                     logger.debug("Failed to decrypt 0x88 reassembled payload: %s", e)
             return replies
 
+        # 6. Opcode 0x8a (HandshakeFinal / BandwidthLimit)
+        if opcode == 0x8A:
+            ack = build_ack_response(data, header_flag=ack_hdr_val)
+            if ack:
+                replies.append(ack)
+            return replies
+
         # Fallback ACK for any other request
-        ack = build_ack_response(data)
+        ack = build_ack_response(data, header_flag=ack_hdr_val)
         if ack:
             replies.append(ack)
         return replies
@@ -510,11 +605,14 @@ class LanBridgeClient:
             xml_str = plaintext.decode("gbk", errors="replace")
         logger.debug("Received envelope Opcode=0x%04X: %s", opcode, xml_str[:120])
 
+        session = self.get_session(peer_ip)
+        header_flag = session.get_header_flag()
+
         # Opcode 1004 (0x03EC): X_SEND_MSG
         if opcode == 0x03EC or ("<X_SEND_MSG " in xml_str or "<X_SEND_MSG>" in xml_str):
             msg_id = extract_msg_id(xml_str)
             ack_env = build_x_send_msg_ack_envelope(msg_id)
-            frags = build_opcode_88_fragments(ack_env)
+            frags = build_opcode_88_fragments(ack_env, header_flag=header_flag)
             replies.extend(frags)
 
             sender_uid = "unknown"
@@ -563,7 +661,46 @@ class LanBridgeClient:
         # Opcode 1000 (0x03E8): X_HANDSHARK
         elif opcode == 0x03E8 or "<X_HANDSHARK" in xml_str:
             ready_env = build_x_ready_envelope(self.user_id)
-            replies.extend(build_opcode_88_fragments(ready_env))
+            replies.extend(build_opcode_88_fragments(ready_env, header_flag=header_flag))
+
+            # Send our profile back if needed so peer has our contact record
+            profile_env = build_native_profile(
+                nick=self.nickname,
+                user_id=self.user_id,
+                corp_id=self.corp_id,
+                status=self.status,
+                sign=self.signature,
+                group=self.group,
+                tcp_file_port=self.tcp_file_port,
+            )
+            replies.extend(build_opcode_88_fragments(profile_env, header_flag=header_flag))
+
+            # Parse sender's nickname and mark online
+            import xml.etree.ElementTree as ET
+            try:
+                root = ET.fromstring(xml_str)
+                info_elem = root.find("INFO")
+                if info_elem is not None:
+                    p_name = info_elem.findtext("NAME")
+                    for c in self.contacts.values():
+                        if c.ip == peer_ip:
+                            if p_name:
+                                c.nickname = p_name
+                            c.status = 0
+                            c.last_seen = time.time()
+                            self.emit_contact_online(c)
+                            break
+            except Exception:
+                pass
+
+        # Opcode 1018 (0x03FA): X_READY
+        elif opcode == Opcode.X_READY or "<X_READY" in xml_str:
+            for c in self.contacts.values():
+                if c.ip == peer_ip:
+                    c.status = 0
+                    c.last_seen = time.time()
+                    self.emit_contact_online(c)
+                    break
 
         # Opcode 1008 (0x03F0): X_SEND_WRITTING (Typing State)
         elif opcode == Opcode.X_SEND_WRITTING or "<X_SEND_WRITTING" in xml_str:
@@ -921,6 +1058,10 @@ class LanBridgeClient:
         if self.auto_scan_on_start and self.bind_ip != "127.0.0.1":
             scan_task = asyncio.create_task(self._auto_subnet_scan_task())
             self._bg_tasks.append(scan_task)
+
+        # 6. Periodic heartbeat ping and discovery presence loop
+        hb_task = asyncio.create_task(self._heartbeat_loop())
+        self._bg_tasks.append(hb_task)
 
 
     async def _handle_tcp_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -1445,25 +1586,43 @@ class LanBridgeClient:
             logger.debug("[ShadowKeeper] Background cache skipped or failed for %s: %s", shared_file.filename, e)
 
     async def broadcast_presence(self) -> None:
-        """Send UDP 9011 presence broadcasts to all configured broadcast destinations."""
-        if not self._udp_9011_transport:
-            return
-        for b_ip in self.broadcast_ips:
-            pkt = build_nwt_discovery_packet(
-                cmd=1,
+        """Send UDP 9011 presence broadcasts and UDP 2425 IPMSG broadcasts to all destinations."""
+        if self._udp_9011_transport:
+            for b_ip in self.broadcast_ips:
+                pkt = build_nwt_discovery_packet(
+                    cmd=1,
+                    user_id=self.user_id,
+                    broadcast_ip=b_ip,
+                    dynamic_port=self.dynamic_port,
+                    guid=self.guid,
+                )
+                try:
+                    self._udp_9011_transport.sendto(pkt, (b_ip, self.discovery_port))
+                    logger.info("Sent discovery broadcast to %s:%d", b_ip, self.discovery_port)
+                except Exception as e:
+                    logger.warning("Failed sending discovery broadcast to %s: %s", b_ip, e)
+
+        # UDP 2425 IPMSG presence broadcast
+        try:
+            ipmsg_pkt = build_ipmsg_presence(
+                nick=self.nickname,
+                group=self.group,
                 user_id=self.user_id,
-                broadcast_ip=b_ip,
-                dynamic_port=self.dynamic_port,
-                guid=self.guid,
+                use_shiyeline_prefix=False,
             )
-            try:
-                self._udp_9011_transport.sendto(pkt, (b_ip, self.discovery_port))
-                logger.info("Sent discovery broadcast to %s:%d", b_ip, self.discovery_port)
-            except Exception as e:
-                logger.warning("Failed sending discovery broadcast to %s: %s", b_ip, e)
+            sock2425 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock2425.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            for b_ip in self.broadcast_ips:
+                try:
+                    sock2425.sendto(ipmsg_pkt, (b_ip, 2425))
+                except Exception:
+                    pass
+            sock2425.close()
+        except Exception as e:
+            logger.debug("Failed sending IPMSG broadcast: %s", e)
 
     async def _proactive_connect(self, peer_ip: str) -> None:
-        """Initiate proactive ENet connection (Opcode 0x82) to peer."""
+        """Initiate proactive ENet connection (Opcode 0x82) and unicast discovery to peer."""
         session = self.get_session(peer_ip)
         connect_pkt = session.build_connect(b"\x01\x02\x03\x04")
         if self._udp_9012_transport:
@@ -1472,6 +1631,72 @@ class LanBridgeClient:
                 logger.debug("Sent proactive ENet connect to %s:%d", peer_ip, self.main_port)
             except Exception as e:
                 logger.debug("Failed sending proactive connect to %s: %s", peer_ip, e)
+
+        # Unicast UDP 9011 discovery packet (cmd=1) directly to peer_ip:9011
+        if self._udp_9011_transport:
+            disc_pkt = build_nwt_discovery_packet(
+                cmd=1,
+                user_id=self.user_id,
+                broadcast_ip=peer_ip,
+                dynamic_port=self.dynamic_port,
+                guid=self.guid,
+            )
+            try:
+                self._udp_9011_transport.sendto(disc_pkt, (peer_ip, self.discovery_port))
+            except Exception:
+                pass
+
+        # Unicast UDP 2425 IPMSG packet directly to peer_ip:2425
+        try:
+            ipmsg_pkt = build_ipmsg_presence(
+                nick=self.nickname,
+                group=self.group,
+                user_id=self.user_id,
+                use_shiyeline_prefix=False,
+            )
+            sock2425 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock2425.sendto(ipmsg_pkt, (peer_ip, 2425))
+            sock2425.close()
+        except Exception:
+            pass
+
+    async def _heartbeat_loop(self) -> None:
+        """Periodically send ENet Ping / Heartbeat and refresh discovery presence."""
+        step = 0
+        while self._running:
+            try:
+                await asyncio.sleep(10.0)
+                if not self._running:
+                    break
+                step += 1
+
+                # 1. Send ENet Opcode 0x85 Ping to all active peers
+                if self._udp_9012_transport:
+                    for peer_ip, session in list(self.sessions.items()):
+                        if session.connected or session.peer_id > 0:
+                            session.ping_counter = getattr(session, "ping_counter", 1) + 1
+                            ping_pkt = session.build_ping(session.ping_counter)
+                            try:
+                                self._udp_9012_transport.sendto(ping_pkt, (peer_ip, self.main_port))
+                            except Exception as e:
+                                logger.debug("Failed sending ping to %s: %s", peer_ip, e)
+
+                # 2. Check for offline contacts (last_seen > 90 seconds)
+                now = time.time()
+                for contact in list(self.contacts.values()):
+                    if contact.status == 0 and (now - contact.last_seen > 90.0):
+                        contact.status = 1
+                        self.emit_contact_offline(contact)
+                        logger.info("Contact marked offline (timeout): UID=%s (%s)", contact.user_id, contact.nickname)
+
+                # 3. Refresh presence broadcast every 30 seconds (every 3 steps)
+                if step % 3 == 0:
+                    await self.broadcast_presence()
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug("Error in heartbeat loop: %s", e)
 
     async def scan_subnets(self, targets: Optional[List[str]] = None) -> List[Contact]:
         """Actively scan local/cross subnets to discover online peers and update contacts directory."""
@@ -1544,8 +1769,10 @@ class LanBridgeClient:
 
     async def send_message(self, target_ip: str, text: str) -> None:
         """Send a text message to a specific IP endpoint."""
+        session = self.get_session(target_ip)
+        header_flag = session.get_header_flag()
         env = build_x_send_msg_envelope(text)
-        frags = build_opcode_88_fragments(env)
+        frags = build_opcode_88_fragments(env, header_flag=header_flag)
         if self._udp_9012_transport:
             for frag in frags:
                 self._udp_9012_transport.sendto(frag, (target_ip, self.main_port))
@@ -1563,7 +1790,6 @@ class LanBridgeClient:
         and configured broadcast addresses.
         """
         env = build_x_qgroup_send_msg_envelope(qgroup_id=qgroup_id, text=text)
-        frags = build_opcode_88_fragments(env)
         if not self._udp_9012_transport:
             return
 
@@ -1578,6 +1804,8 @@ class LanBridgeClient:
                 destinations.add(b_ip)
 
         for dest in destinations:
+            session = self.get_session(dest)
+            frags = build_opcode_88_fragments(env, header_flag=session.get_header_flag())
             for frag in frags:
                 try:
                     self._udp_9012_transport.sendto(frag, (dest, self.main_port))
@@ -1587,8 +1815,9 @@ class LanBridgeClient:
 
     async def sync_group_info(self, qgroup_id: str, target_ip: str) -> None:
         """Request QGroup metadata and member directory via Opcode 3005."""
+        session = self.get_session(target_ip)
         env = build_x_qgroup_req_info_envelope(qgroup_id=qgroup_id)
-        frags = build_opcode_88_fragments(env)
+        frags = build_opcode_88_fragments(env, header_flag=session.get_header_flag())
         if self._udp_9012_transport:
             for frag in frags:
                 self._udp_9012_transport.sendto(frag, (target_ip, self.main_port))
@@ -1611,8 +1840,9 @@ class LanBridgeClient:
         token = random.randint(10000, 30000)
         self.pending_tokens[token] = img_md5
 
+        session = self.get_session(target_ip)
         env = build_x_send_image_envelope(img_md5, token=token, caption=caption)
-        frags = build_opcode_88_fragments(env)
+        frags = build_opcode_88_fragments(env, header_flag=session.get_header_flag())
         if self._udp_9012_transport:
             for frag in frags:
                 self._udp_9012_transport.sendto(frag, (target_ip, self.main_port))
@@ -1621,8 +1851,9 @@ class LanBridgeClient:
 
     async def shake_window(self, target_ip: str) -> None:
         """Send a window shake notice to target IP."""
+        session = self.get_session(target_ip)
         env = build_x_flash_screen_envelope()
-        frags = build_opcode_88_fragments(env)
+        frags = build_opcode_88_fragments(env, header_flag=session.get_header_flag())
         if self._udp_9012_transport:
             for frag in frags:
                 self._udp_9012_transport.sendto(frag, (target_ip, self.main_port))
@@ -1805,8 +2036,9 @@ class LanBridgeClient:
 
     async def send_typing_state(self, peer_ip: str, typing: bool = True) -> None:
         """Send typing status notice (X_SEND_WRITTING) to peer IP."""
+        session = self.get_session(peer_ip)
         env = build_x_send_writting_envelope(typing=typing)
-        frags = build_opcode_88_fragments(env)
+        frags = build_opcode_88_fragments(env, header_flag=session.get_header_flag())
         if self._udp_9012_transport:
             for frag in frags:
                 self._udp_9012_transport.sendto(frag, (peer_ip, self.main_port))
@@ -1824,7 +2056,6 @@ class LanBridgeClient:
             target_uuid=target_uuid,
             qgroup_id=qgroup_id,
         )
-        frags = build_opcode_88_fragments(env)
         if not self._udp_9012_transport:
             return
         if qgroup_id and not target_ip:
@@ -1835,12 +2066,16 @@ class LanBridgeClient:
             for b_ip in self.broadcast_ips:
                 destinations.add(b_ip)
             for dest in destinations:
+                session = self.get_session(dest)
+                frags = build_opcode_88_fragments(env, header_flag=session.get_header_flag())
                 for frag in frags:
                     try:
                         self._udp_9012_transport.sendto(frag, (dest, self.main_port))
                     except Exception:
                         pass
         else:
+            session = self.get_session(target_ip)
+            frags = build_opcode_88_fragments(env, header_flag=session.get_header_flag())
             for frag in frags:
                 self._udp_9012_transport.sendto(frag, (target_ip, self.main_port))
 
@@ -1922,6 +2157,9 @@ class LanBridgeClient:
         summary["account"] = account_uid
         summary["user_name"] = user_opts.get("user_name")
         summary["signature"] = user_opts.get("signature")
+
+        if user_opts.get("corp_id"):
+            self.corp_id = user_opts["corp_id"]
 
         if apply_identity:
             if account_uid:

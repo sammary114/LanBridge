@@ -195,6 +195,76 @@ class TestLanBridgeSDK(unittest.TestCase):
         self.assertEqual(len(shakes), 1)
         self.assertEqual(shakes[0].peer_ip, "192.168.1.100")
 
+    def test_opcode_83_handshake_flow(self) -> None:
+        """Verify Opcode 0x83 triggers Frame 11, Frame 17, Profile frags with dynamic header."""
+        client = LanBridgeClient(
+            user_id="bot_user_id_11111111111111111",
+            nickname="TestBot",
+        )
+        # Mock Opcode 0x83 packet from peer with out_peer=2, in_sess=1
+        pkt_83 = (
+            b"\x90\x00"
+            + b"\x12\x34"
+            + b"\x83\xff\x00\x01"
+            + struct.pack(">HBB", 2, 1, 1)
+            + b"\x00" * 36
+        )
+        peer_addr = ("192.168.1.60", 9012)
+        replies = client.handle_main_udp_packet(pkt_83, peer_addr)
+
+        # Expected header_flag: 0x8000 | (1 << 12) | 2 = 0x9002
+        expected_flag = 0x9002
+        session = client.get_session("192.168.1.60")
+        self.assertTrue(session.connected)
+        self.assertEqual(session.peer_id, 2)
+        self.assertEqual(session.session_id, 1)
+        self.assertEqual(session.get_header_flag(), expected_flag)
+
+        self.assertGreaterEqual(len(replies), 3)
+
+        # 1. Frame 11 (ACK + PING)
+        frame11 = replies[0]
+        self.assertEqual(len(frame11), 16)
+        hdr11_val = struct.unpack(">H", frame11[:2])[0]
+        self.assertEqual(hdr11_val, expected_flag)
+        self.assertEqual(frame11[4], 0x01)  # Opcode 0x01 ACK
+        self.assertEqual(frame11[12], 0x85)  # Opcode 0x85 PING
+
+        # 2. Frame 17 (304B Node Announcement)
+        frame17 = replies[1]
+        self.assertEqual(len(frame17), 314)
+        hdr17_val = struct.unpack(">H", frame17[:2])[0]
+        self.assertEqual(hdr17_val, expected_flag)
+        self.assertEqual(frame17[4], 0x86)  # Opcode 0x86 SEND_RELIABLE
+        disc_cmd = struct.unpack(">I", frame17[14:18])[0]
+        self.assertEqual(disc_cmd, 4)  # Cmd 4 (Discovery Handshake)
+
+        # 3. Profile Fragments (Opcode 0x88)
+        frag1 = replies[2]
+        hdr_frag_val = struct.unpack(">H", frag1[:2])[0]
+        self.assertEqual(hdr_frag_val, expected_flag)
+        self.assertEqual(frag1[4], 0x88)  # Opcode 0x88 SEND_FRAGMENT
+
+    def test_enet_ping_and_ack_with_dynamic_header(self) -> None:
+        """Verify ping generator and ACK builders with dynamic session parameters."""
+        session = ENetProtocolSession()
+        session.peer_id = 3
+        session.session_id = 2
+        self.assertEqual(session.get_header_flag(), 0xA003)
+
+        ping_pkt = session.build_ping(counter=5)
+        self.assertEqual(len(ping_pkt), 8)
+        self.assertEqual(ping_pkt[4], 0x85)  # Opcode 0x85 PING
+        counter_val = struct.unpack(">H", ping_pkt[6:8])[0]
+        self.assertEqual(counter_val, 5)
+
+        # Build ACK with dynamic header
+        req_pkt = b"\x80\x00\x11\x22\x85\xff\x00\x05"
+        ack = lanbridge.protocol.build_ack_response(req_pkt, header_flag=session.get_header_flag())
+        self.assertIsNotNone(ack)
+        self.assertEqual(len(ack), 10)
+        self.assertEqual(struct.unpack(">H", ack[:2])[0], 0xA003)
+
 
 if __name__ == "__main__":
     unittest.main()

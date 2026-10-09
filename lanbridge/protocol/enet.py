@@ -115,3 +115,13 @@ class ENetProtocolSession:
         hdr = self.get_header(has_sent_time=False)
         ack = struct.pack(">BBHHH", ENetCommandType.ACKNOWLEDGE, channel, seq, seq, self.last_remote_sent_time)
         return hdr + ack
+
+    def build_ping(self, counter: int = 1) -> bytes:
+        """Build 8-byte Opcode 0x85 Heartbeat Ping frame."""
+        hdr = self.get_header(has_sent_time=True)
+        cmd = struct.pack(">BBH", ENetCommandType.PING | FLAG_ACKNOWLEDGE, 0xFF, counter)
+        return hdr + cmd
+
+    def get_header_flag(self) -> int:
+        """Return the 16-bit ENet header flag combining session_id and peer_id."""
+        return FLAG_SENT_TIME | ((self.session_id & 3) << 12) | (self.peer_id & 0x0FFF)

@@ -267,7 +267,7 @@ ip.addr == 47.57.13.180 && tcp.port == 80
 - **零配置自驱动接入引擎（Zero-Touch Autonomous Integration & Group Chat）全面交付**：
   * **网卡自适应与定向多广播**：`lanbridge.discovery.network` 自动枚举活动物理/虚拟网卡（剥离 loopback 和 APIPA 169.254.x），向所有活动子网定向广播和 `255.255.255.255` 并发宣告上线，双方用户均无需手动查询 IP 或配置网段。
   * **开机静默单播穿透扫描与主动唤醒**：客户端开机后台异步驱动 `SubnetScanner` 并发单播探测本地 `/24` 所在网段，收到反馈立即主动发起 ENet Opcode 0x82 握手与 profile 推送，在对端联系人树上无感点亮在线绿标。
-- **自动化测试套件**：全量 **124 项自动化测试**（124/124 PASS），涵盖传输层、密码机、协议握手、文件引擎、群文件共享、跨网段主动探测、QGroup全套生命周期管理、Web 网关、Vue 3 离线单页客户端、CLI 增强、原生内网通目录数据适配、在线主动扫描以及原生窗口抖动（Flash Screen）。
+- **自动化测试套件**：全量 **126 项自动化测试**（126/126 PASS），涵盖传输层、密码机、协议握手、文件引擎、群文件共享、跨网段主动探测、QGroup全套生命周期管理、Web 网关、Vue 3 离线单页客户端、CLI 增强、原生内网通目录数据适配、在线主动扫描以及原生窗口抖动（Flash Screen）与原生在线双向握手点亮。
 - **M6 里程碑全面交付（全功能闭环与 Web 客户端/Bot 网关）**：
   * **多人讨论组/群聊全套生命周期管理**：完整逆向还原并实现原生 13 项群组命令字（建群、入群应答、群资料/公告推送、群成员变动、拉取成员、踢人、解散、退群）；
   * **聊天增强与状态机制**：实现原生输入中指示 `X_SEND_WRITTING`（Opcode 1008）、消息撤回机制 `recall`（原生 JSON type 6）、个人在线状态切换与个性签名广播；
@@ -289,4 +289,8 @@ ip.addr == 47.57.13.180 && tcp.port == 80
   * **底层 SDK 双向收发支持**：新增 `ShakeNotice` 数据模型，`LanBridgeClient` 实现 `shake_window(target_ip)` 与 `on_shake` / `emit_shake` 事件闭环，解包 0x03EF 自动匹配对端身份与 IP；
   * **Web 接口与 WebSocket 双向实时流**：Web Gateway 新增 `POST /api/shake` REST 端点（支持 IP 与 user_id 双模式解析）、WebSocket `window_shake` 实时广播以及客户端向网关发送 `action="shake"` 支持；
   * **现代化交互与逼真动效呈现**：Web UI 修复工具栏“窗口抖动”按钮私聊可用性限制，注入 `@keyframes window-shake` CSS 动效类（`.anim-shake`），收发抖动时均触发视口震颤动效并在聊天时间轴上以高亮徽标流式呈现 `🔔 你向 [对方] 发送了一个窗口抖动` 与 `🔔 [对方] 向你发送了一个窗口抖动！`。
+- **M10 原生在线双向握手与状态点亮闭环（Native Presence & Handshake Closure）全面交付**：
+  * **动态 ENet 会话参数与 Header Flag 合成**：严格依据 ENet 规范动态解析 0x83 应答中的 `(out_peer, in_sess)`，动态计算 `header_flag = 0x8000 | ((in_sess & 3) << 12) | (out_peer & 0x0FFF)`，彻底解决硬编码 `0x9000` 导致跨网段/不同客户端静默丢包的问题；
+  * **7 阶段握手完整帧序列闭环**：收到 0x83 自动触发 Frame 11（ACK+Ping）、Frame 17（304B Node Announcement 发现宣告）及 Stage 5 个人资料 Profile 分片；并在被动收到 `<X_HANDSHARK>` 时双向回传自身 Profile，使对端联系人树成功录入我方身份；
+  * **心跳保活与全网互通双轨机制**：引入后台 `_heartbeat_loop`（10 秒周期性发送 0x85 Ping，30 秒广播 UDP 9011 与 UDP 2425 IPMSG 上线通告），确保对端联系人树上永久稳定点亮绿色在线徽标。
 
