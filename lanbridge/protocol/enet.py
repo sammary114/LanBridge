@@ -54,7 +54,7 @@ class ENetProtocolSession:
     def __init__(self, outgoing_peer_id: int = 0) -> None:
         self.outgoing_peer_id = outgoing_peer_id
         self.peer_id: int = 0
-        self.session_id: int = 0
+        self.session_id: int = 1
         self.connected: bool = False
         self.local_sent_time: int = 0x1000
         self.last_remote_sent_time: int = 0

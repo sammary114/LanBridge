@@ -456,9 +456,10 @@ class LanBridgeClient:
             remote_sent_time = int.from_bytes(data[2:4], "big")
             session.last_remote_sent_time = remote_sent_time
 
-        if session.peer_id == 0 and (h_val & 0x0FFF) != 0x0FFF:
-            session.peer_id = h_val & 0x0FFF
-            session.session_id = (h_val >> 12) & 3
+        # Synchronize remote session ID if packet carries a non-zero session ID
+        remote_sess = (h_val >> 12) & 3
+        if remote_sess > 0:
+            session.session_id = remote_sess
 
         ack_hdr_val = ((session.session_id & 3) << 12) | (session.peer_id & 0x0FFF)
         opcode = data[cmd_offset]
@@ -468,7 +469,8 @@ class LanBridgeClient:
             if len(data) >= cmd_offset + 8:
                 out_peer, in_sess, out_sess = struct.unpack(">HBB", data[cmd_offset + 4 : cmd_offset + 8])
                 session.peer_id = out_peer
-                session.session_id = in_sess
+                session.session_id = out_sess if out_sess > 0 else (in_sess if in_sess > 0 else 1)
+                session.connected = True
             reply_83 = build_handshake_reply(data)
             replies.append(reply_83)
             return replies
@@ -478,7 +480,7 @@ class LanBridgeClient:
             if len(data) >= cmd_offset + 8:
                 out_peer, in_sess, out_sess = struct.unpack(">HBB", data[cmd_offset + 4 : cmd_offset + 8])
                 session.peer_id = out_peer
-                session.session_id = in_sess
+                session.session_id = out_sess if out_sess > 0 else (in_sess if in_sess > 0 else 1)
                 session.connected = True
 
             header_flag = session.get_header_flag()
@@ -1037,8 +1039,11 @@ class LanBridgeClient:
             def datagram_received(self, data: bytes, addr: Tuple[str, int]):
                 replies = self.client.handle_main_udp_packet(data, addr)
                 if replies and self.transport:
+                    dest_main = (addr[0], self.client.main_port)
                     for pkt in replies:
-                        self.transport.sendto(pkt, addr)
+                        self.transport.sendto(pkt, dest_main)
+                        if addr[1] != self.client.main_port:
+                            self.transport.sendto(pkt, addr)
 
         try:
             sock_9011 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -1657,13 +1662,14 @@ class LanBridgeClient:
     async def _proactive_connect(self, peer_ip: str) -> None:
         """Initiate proactive ENet connection (Opcode 0x82) and unicast discovery to peer."""
         session = self.get_session(peer_ip)
-        connect_pkt = session.build_connect(b"\x01\x02\x03\x04")
-        if self._udp_9012_transport:
-            try:
-                self._udp_9012_transport.sendto(connect_pkt, (peer_ip, self.main_port))
-                logger.debug("Sent proactive ENet connect to %s:%d", peer_ip, self.main_port)
-            except Exception as e:
-                logger.debug("Failed sending proactive connect to %s: %s", peer_ip, e)
+        if not session.connected:
+            connect_pkt = session.build_connect(b"\x01\x02\x03\x04")
+            if self._udp_9012_transport:
+                try:
+                    self._udp_9012_transport.sendto(connect_pkt, (peer_ip, self.main_port))
+                    logger.debug("Sent proactive ENet connect to %s:%d", peer_ip, self.main_port)
+                except Exception as e:
+                    logger.debug("Failed sending proactive connect to %s: %s", peer_ip, e)
 
         # Unicast UDP 9011 discovery packet (cmd=1) directly to peer_ip:9011
         if self._udp_9011_transport:
@@ -1810,11 +1816,11 @@ class LanBridgeClient:
     async def send_message(self, target_ip: str, text: str) -> None:
         """Send a text message to a specific IP endpoint."""
         session = self.get_session(target_ip)
-        if not session.connected or session.peer_id == 0:
+        if not session.connected:
             logger.info("Session to %s not active, initiating ENet connection handshake...", target_ip)
             await self._proactive_connect(target_ip)
             for _ in range(20):
-                if session.connected and session.peer_id != 0:
+                if session.connected:
                     break
                 await asyncio.sleep(0.05)
 

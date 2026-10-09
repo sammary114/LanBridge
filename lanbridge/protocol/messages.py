@@ -210,10 +210,10 @@ def extract_chat_message(dec_xml: str) -> str:
 def extract_msg_id(dec_xml: str) -> int:
     """Extract MSG_ID integer from decrypted X_SEND_MSG XML payload."""
     try:
-        start = dec_xml.find("<MSG_ID>")
-        end = dec_xml.find("</MSG_ID>")
-        if start != -1 and end != -1:
-            return int(dec_xml[start + 8 : end].strip())
+        import re
+        m = re.search(r"<MSG_ID[^>]*>\s*(\d+)\s*</MSG_ID>", dec_xml, re.IGNORECASE)
+        if m:
+            return int(m.group(1))
     except Exception:
         pass
     return 1

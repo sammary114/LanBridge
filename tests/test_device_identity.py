@@ -5,6 +5,7 @@ import os
 import shutil
 import tempfile
 import socket
+import struct
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -183,6 +184,60 @@ class TestDeviceIdentityAndGrouping(unittest.IsolatedAsyncioTestCase):
         # Verify outgoing_seq advanced and is not hardcoded
         self.assertGreater(sub_id2, sub_id1)
 
+    def test_opcode_82_connect_session_and_peer_tracking(self):
+        """Verify that receiving 0x82 Connect preserves out_peer and sets session_id=1 and connected=True."""
+        client = LanBridgeClient(auto_scan_on_start=False)
+        peer_ip = "192.168.31.225"
+
+        # Construct authentic 0x82 Connect packet from PC with out_peer=3
+        pkt_82 = (
+            struct.pack(">HH", 0x8FFF, 0x1000)
+            + b"\x82\xff\x00\x01\x00\x03\x00\x00\x00\x00\x05\x78\x00\x01\x00\x00\x00\x00\x00\x01"
+            + b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x13\x88\x00\x00\x00\x02\x00\x00\x00\x02"
+            + b"\xa9\x05\x45\x2a\x00\x00\x00\x00"
+        )
+        replies = client.handle_main_udp_packet(pkt_82, (peer_ip, 9012))
+        self.assertEqual(len(replies), 1)
+
+        session = client.get_session(peer_ip)
+        self.assertTrue(session.connected)
+        self.assertEqual(session.peer_id, 3)
+        self.assertEqual(session.session_id, 1)
+
+        # Now simulate PC sending X_SEND_MSG (with h_val=0x9000 carrying receiver peer 0)
+        from lanbridge.protocol.messages import build_x_send_msg_envelope
+        from lanbridge.protocol.crypto import XteaEngine
+        env = build_x_send_msg_envelope("hello from pc", msg_id=10086)
+        # PC sends with header flag 0x9000 (session 1, receiver 0)
+        fake_hdr = struct.pack(">HH", 0x9000, 0x2000)
+        cmd = struct.pack(">BBHH", 0x86, 0x00, 1, len(env))
+        data_pkt = fake_hdr + cmd + env
+
+        data_replies = client.handle_main_udp_packet(data_pkt, (peer_ip, 9012))
+        self.assertGreaterEqual(len(data_replies), 2)
+
+        # Ensure session.peer_id was NOT overwritten to 0!
+        self.assertEqual(session.peer_id, 3)
+        self.assertEqual(session.session_id, 1)
+
+        # Verify X_SEND_MSG_ACK response header has peer_id=3 and session_id=1 (0x9003)
+        ack_pkt = data_replies[-1]
+        ack_hdr = struct.unpack(">H", ack_pkt[:2])[0]
+        self.assertEqual(ack_hdr, 0x8000 | (1 << 12) | 3)  # 0x9003
+
+        xtea = XteaEngine()
+        op, dec = xtea.parse_envelope(ack_pkt[10:])
+        self.assertEqual(op, 0x03ED)
+        self.assertIn("<MSG_ID>10086</MSG_ID>", dec.decode("utf-8"))
+
+    def test_extract_msg_id_robust(self):
+        """Verify robust msg_id extraction across various formats and attributes."""
+        from lanbridge.protocol.messages import extract_msg_id
+        self.assertEqual(extract_msg_id('<X_SEND_MSG docver="1"><MSG_ID>12345</MSG_ID></X_SEND_MSG>'), 12345)
+        self.assertEqual(extract_msg_id('<X_SEND_MSG><MSG_ID docver="2">   9876543210   </MSG_ID></X_SEND_MSG>'), 9876543210)
+        self.assertEqual(extract_msg_id('<invalid>xml</invalid>'), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
+
