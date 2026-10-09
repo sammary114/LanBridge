@@ -72,6 +72,11 @@ class TestWebGateway(AioHTTPTestCase):
         self.assertTrue(data["ok"])
         self.assertEqual(len(data["groups"]), 1)
         self.assertEqual(data["groups"][0]["name"], "研发一组")
+        self.assertIn("members_detail", data["groups"][0])
+        self.assertEqual(len(data["groups"][0]["members_detail"]), 2)
+        self_member = next(m for m in data["groups"][0]["members_detail"] if m["is_self"])
+        self.assertEqual(self_member["status"], 0)
+        self.assertEqual(self_member["nickname"], "GatewayBot")
 
     @unittest_run_loop
     async def test_post_create_group(self):

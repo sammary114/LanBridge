@@ -333,6 +333,198 @@
             cursor: not-allowed;
         }
 
+        .btn-action.active {
+            background-color: rgba(59, 130, 246, 0.25);
+            border-color: var(--accent);
+            color: #93c5fd;
+        }
+
+        /* Chat Body & Members Layout */
+        .chat-body-layout {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .chat-main-column {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-width: 0;
+        }
+
+        /* Group Members Sidebar */
+        .group-members-sidebar {
+            width: 230px;
+            background-color: var(--bg-secondary);
+            border-left: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            overflow: hidden;
+            transition: width 0.2s ease;
+        }
+
+        .members-sidebar-header {
+            padding: 12px 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+            background-color: rgba(30, 41, 59, 0.4);
+        }
+
+        .members-header-title {
+            font-weight: 600;
+            font-size: 13px;
+            color: var(--text-main);
+        }
+
+        .members-header-count {
+            font-size: 11px;
+            color: var(--accent);
+            background: rgba(59, 130, 246, 0.15);
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-weight: 500;
+        }
+
+        .members-search-box {
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .members-search-input {
+            width: 100%;
+            background-color: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 5px 8px;
+            color: var(--text-main);
+            font-size: 12px;
+            outline: none;
+        }
+
+        .members-search-input:focus {
+            border-color: var(--accent);
+        }
+
+        .members-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 6px 0;
+        }
+
+        .member-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 14px;
+            transition: background 0.15s;
+            cursor: pointer;
+        }
+
+        .member-row:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+
+        .member-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #475569, #334155);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 11px;
+            color: #f1f5f9;
+            flex-shrink: 0;
+            position: relative;
+        }
+
+        .member-avatar .status-indicator {
+            position: absolute;
+            bottom: -1px;
+            right: -1px;
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            border: 2px solid var(--bg-secondary);
+        }
+
+        .status-indicator.online {
+            background-color: var(--status-online);
+        }
+
+        .status-indicator.offline {
+            background-color: #64748b;
+        }
+
+        .member-meta {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .member-name-row {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .member-name {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-main);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .badge-role {
+            font-size: 10px;
+            padding: 1px 4px;
+            border-radius: 3px;
+            line-height: 1.2;
+            flex-shrink: 0;
+        }
+
+        .badge-role.master {
+            background-color: #f59e0b;
+            color: #fff;
+        }
+
+        .badge-role.self {
+            background-color: var(--accent);
+            color: #fff;
+        }
+
+        .member-sub-info {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+        }
+
+        .text-online {
+            color: var(--status-online);
+        }
+
+        .text-offline {
+            color: #94a3b8;
+        }
+
+        .member-ip {
+            color: #64748b;
+            font-size: 10px;
+            font-family: monospace;
+        }
+
         /* Messages stream */
         .messages-container {
             flex: 1;
@@ -693,14 +885,20 @@
                     <div class="chat-title">{{ currentChat ? currentChat.name : '选择联系人或讨论组' }}</div>
                     <div class="chat-subtitle" v-if="currentChat">
                         <span v-if="currentChat.type === 'peer'">IP: {{ currentChat.ip }}</span>
-                        <span v-else-if="currentChat.members && Object.keys(currentChat.members).length">
-                            群成员 ({{ Object.keys(currentChat.members).length }}人): {{ Object.values(currentChat.members).slice(0, 10).join('、') }}{{ Object.keys(currentChat.members).length > 10 ? ' 等...' : '' }}
-                        </span>
                         <span v-else>讨论组 ID: {{ currentChat.id }}</span>
                     </div>
                     <div class="chat-subtitle" v-else>已就绪</div>
                 </div>
                 <div class="header-actions">
+                    <button
+                        v-if="currentChat && currentChat.type === 'group'"
+                        class="btn-action"
+                        :class="{ active: showMembersPanel }"
+                        @click="showMembersPanel = !showMembersPanel"
+                        title="展开/收起群成员列表"
+                    >
+                        👥 群成员 ({{ currentGroupOnlineCount }}/{{ currentGroupMembers.length }})
+                    </button>
                     <button
                         class="btn-action"
                         :disabled="isSyncing"
@@ -715,68 +913,121 @@
                 </div>
             </div>
 
-            <!-- 消息历史流 -->
-            <div class="messages-container" ref="messagesContainerRef">
-                <template v-for="m in currentMessages" :key="m.msg_id">
-                    <div v-if="m.recalled" class="recalled-notice">
-                        {{ m.is_self ? '你' : '对方' }} 撤回了一条消息
-                    </div>
-                    <div v-else class="message" :class="m.is_self ? 'self' : 'peer'">
-                        <div v-if="!m.is_self && currentChat && currentChat.type === 'group'" class="sender-tag">
-                            {{ m.sender_name || m.sender_id }}
-                        </div>
-                        <div class="bubble">
-                            <div v-if="m.is_image && m.image_md5">
-                                <img
-                                    :src="'/api/images/' + m.image_md5"
-                                    class="chat-image"
-                                    @click="openImage('/api/images/' + m.image_md5)"
-                                    alt="图片"
-                                    loading="lazy"
-                                />
-                                <div v-if="m.text" style="margin-top: 6px;">{{ m.text }}</div>
+            <!-- 聊天主视口与右侧成员面板 -->
+            <div class="chat-body-layout">
+                <div class="chat-main-column">
+                    <!-- 消息历史流 -->
+                    <div class="messages-container" ref="messagesContainerRef">
+                        <template v-for="m in currentMessages" :key="m.msg_id">
+                            <div v-if="m.recalled" class="recalled-notice">
+                                {{ m.is_self ? '你' : '对方' }} 撤回了一条消息
                             </div>
-                            <div v-else>
-                                {{ m.text }}
+                            <div v-else class="message" :class="m.is_self ? 'self' : 'peer'">
+                                <div v-if="!m.is_self && currentChat && currentChat.type === 'group'" class="sender-tag">
+                                    {{ m.sender_name || m.sender_id }}
+                                </div>
+                                <div class="bubble">
+                                    <div v-if="m.is_image && m.image_md5">
+                                        <img
+                                            :src="'/api/images/' + m.image_md5"
+                                            class="chat-image"
+                                            @click="openImage('/api/images/' + m.image_md5)"
+                                            alt="图片"
+                                            loading="lazy"
+                                        />
+                                        <div v-if="m.text" style="margin-top: 6px;">{{ m.text }}</div>
+                                    </div>
+                                    <div v-else>
+                                        {{ m.text }}
+                                    </div>
+                                </div>
+                                <div class="msg-meta">
+                                    <span>{{ formatTime(m.timestamp) }}</span>
+                                    <button
+                                        v-if="m.is_self && !m.recalled"
+                                        class="recall-btn"
+                                        @click="recallMessage(m)"
+                                    >
+                                        撤回
+                                    </button>
+                                </div>
                             </div>
-                        </div>
-                        <div class="msg-meta">
-                            <span>{{ formatTime(m.timestamp) }}</span>
-                            <button
-                                v-if="m.is_self && !m.recalled"
-                                class="recall-btn"
-                                @click="recallMessage(m)"
-                            >
-                                撤回
-                            </button>
+                        </template>
+                        <div v-if="!currentChat" class="empty-placeholder" style="margin: auto;">
+                            👈 请在左侧列表中选择联系人或讨论组开启即时会话
                         </div>
                     </div>
-                </template>
-                <div v-if="!currentChat" class="empty-placeholder" style="margin: auto;">
-                    👈 请在左侧列表中选择联系人或讨论组开启即时会话
-                </div>
-            </div>
 
-            <!-- 正在输入提示栏 -->
-            <div class="typing-banner">
-                <span v-if="typingText">💬 {{ typingText }}</span>
-            </div>
+                    <!-- 正在输入提示栏 -->
+                    <div class="typing-banner">
+                        <span v-if="typingText">💬 {{ typingText }}</span>
+                    </div>
 
-            <!-- 输入区域 -->
-            <div class="input-bar">
-                <div class="input-tools">
-                    <button class="tool-btn" :disabled="!currentChat" @click="sendShake">窗口抖动</button>
-                    <button class="tool-btn" :disabled="!currentChat || currentChat.type !== 'group'" @click="triggerFileShare">群共享文件</button>
+                    <!-- 输入区域 -->
+                    <div class="input-bar">
+                        <div class="input-tools">
+                            <button class="tool-btn" :disabled="!currentChat" @click="sendShake">窗口抖动</button>
+                            <button class="tool-btn" :disabled="!currentChat || currentChat.type !== 'group'" @click="triggerFileShare">群共享文件</button>
+                        </div>
+                        <div class="input-row">
+                            <textarea
+                                class="chat-input"
+                                v-model="inputMessage"
+                                :disabled="!currentChat"
+                                placeholder="输入消息 (Enter 发送, Shift+Enter 换行)..."
+                                @keydown="onInputKeydown"
+                            ></textarea>
+                            <button class="send-btn" :disabled="!currentChat" @click="sendMessage">发送</button>
+                        </div>
+                    </div>
                 </div>
-                <div class="input-row">
-                    <textarea
-                        class="chat-input"
-                        v-model="inputMessage"
-                        :disabled="!currentChat"
-                        placeholder="输入消息 (Enter 发送, Shift+Enter 换行)..."
-                        @keydown="onInputKeydown"
-                    ></textarea>
-                    <button class="send-btn" :disabled="!currentChat" @click="sendMessage">发送</button>
+
+                <!-- 群成员侧边列表面板 (当打开群聊且开启面板时显示) -->
+                <div
+                    v-if="currentChat && currentChat.type === 'group' && showMembersPanel"
+                    class="group-members-sidebar"
+                >
+                    <div class="members-sidebar-header">
+                        <span class="members-header-title">群成员 ({{ currentGroupMembers.length }})</span>
+                        <span class="members-header-count">{{ currentGroupOnlineCount }} 在线</span>
+                    </div>
+                    <div class="members-search-box">
+                        <input
+                            class="members-search-input"
+                            v-model="memberSearchQuery"
+                            placeholder="搜索群成员..."
+                        />
+                    </div>
+                    <div class="members-list">
+                        <div
+                            v-for="m in filteredGroupMembers"
+                            :key="m.user_id"
+                            class="member-row"
+                            @click="startPrivateChatWithMember(m)"
+                            :title="m.is_self ? `${m.nickname} (我)` : `点击与 ${m.nickname} 私聊`"
+                        >
+                            <div class="member-avatar">
+                                {{ (m.nickname || 'U').slice(0, 2) }}
+                                <div class="status-indicator" :class="m.status === 0 ? 'online' : 'offline'"></div>
+                            </div>
+                            <div class="member-meta">
+                                <div class="member-name-row">
+                                    <span class="member-name">{{ m.nickname || m.user_id }}</span>
+                                    <span v-if="m.is_master" class="badge-role master">群主</span>
+                                    <span v-if="m.is_self" class="badge-role self">我</span>
+                                </div>
+                                <div class="member-sub-info">
+                                    <span :class="m.status === 0 ? 'text-online' : 'text-offline'">
+                                        ● {{ m.status === 0 ? '在线' : '离线' }}
+                                    </span>
+                                    <span v-if="m.ip" class="member-ip">{{ m.ip }}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div v-if="filteredGroupMembers.length === 0" class="empty-placeholder" style="padding: 24px 8px;">
+                            无匹配群成员
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -809,6 +1060,7 @@
             setup() {
                 // 1. 本地状态
                 const myInfo = reactive({
+                    user_id: '',
                     nickname: 'LanBridge Client',
                     signature: '',
                     local_ip: '127.0.0.1',
@@ -819,6 +1071,8 @@
 
                 const currentTab = ref('contacts');
                 const searchQuery = ref('');
+                const memberSearchQuery = ref('');
+                const showMembersPanel = ref(true);
                 const contacts = ref([]);
                 const groups = ref([]);
                 const sharedFiles = ref([]);
@@ -871,6 +1125,65 @@
                     });
                 });
 
+                const currentGroupMembers = computed(() => {
+                    if (!currentChat.value || currentChat.value.type !== 'group') return [];
+                    const grp = groups.value.find(g => g.qgroup_id === currentChat.value.id);
+                    if (!grp) return [];
+
+                    const contactsMap = {};
+                    for (const c of contacts.value) {
+                        contactsMap[c.user_id] = c;
+                    }
+
+                    const membersDict = grp.members || {};
+                    const list = [];
+                    for (const [uid, nick] of Object.entries(membersDict)) {
+                        const isSelf = (uid === myInfo.user_id || uid === myInfo.nickname);
+                        const contact = contactsMap[uid];
+                        let status = 3;
+                        let ip = '';
+                        if (isSelf) {
+                            status = myInfo.status || 0;
+                            ip = myInfo.local_ip || '';
+                        } else if (contact) {
+                            status = contact.status;
+                            ip = contact.ip || '';
+                        }
+
+                        list.push({
+                            user_id: uid,
+                            nickname: nick || (contact ? contact.nickname : uid),
+                            status: status,
+                            is_self: isSelf,
+                            is_master: (uid === grp.master_id),
+                            ip: ip,
+                        });
+                    }
+
+                    list.sort((a, b) => {
+                        if (a.status !== b.status) return a.status - b.status;
+                        if (a.is_master !== b.is_master) return a.is_master ? -1 : 1;
+                        if (a.is_self !== b.is_self) return a.is_self ? -1 : 1;
+                        return (a.nickname || '').localeCompare(b.nickname || '', 'zh-CN');
+                    });
+
+                    return list;
+                });
+
+                const currentGroupOnlineCount = computed(() => {
+                    return currentGroupMembers.value.filter(m => m.status === 0).length;
+                });
+
+                const filteredGroupMembers = computed(() => {
+                    const q = memberSearchQuery.value.trim().toLowerCase();
+                    if (!q) return currentGroupMembers.value;
+                    return currentGroupMembers.value.filter(m => 
+                        (m.nickname && m.nickname.toLowerCase().includes(q)) ||
+                        (m.user_id && m.user_id.toLowerCase().includes(q)) ||
+                        (m.ip && m.ip.includes(q))
+                    );
+                });
+
                 // 3. 辅助方法
                 const scrollToBottom = async () => {
                     await nextTick();
@@ -888,12 +1201,23 @@
                     window.open(url, '_blank');
                 };
 
+                const startPrivateChatWithMember = (m) => {
+                    if (m.is_self) return;
+                    selectChat({
+                        type: 'peer',
+                        id: m.user_id,
+                        name: m.nickname || m.user_id,
+                        ip: m.ip || ''
+                    });
+                };
+
                 // 4. 数据拉取接口
                 const fetchStatus = async () => {
                     try {
                         const res = await fetch('/api/status');
                         const data = await res.json();
                         if (data.ok) {
+                            myInfo.user_id = data.user_id || '';
                             myInfo.nickname = data.nickname || 'LanBridge Client';
                             myInfo.signature = data.signature || '';
                             myInfo.local_ip = data.local_ip;
@@ -1230,6 +1554,12 @@
                     onInputKeydown,
                     submitCreateGroup,
                     syncNativeNwt,
+                    showMembersPanel,
+                    memberSearchQuery,
+                    currentGroupMembers,
+                    currentGroupOnlineCount,
+                    filteredGroupMembers,
+                    startPrivateChatWithMember,
                 };
             }
         }).mount('#app');

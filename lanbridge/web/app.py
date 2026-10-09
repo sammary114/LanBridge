@@ -297,6 +297,22 @@ class WebGateway:
     async def handle_get_groups(self, request: web.Request) -> web.Response:
         groups_list = []
         for g in self.client.qgroups.values():
+            members_detail = []
+            for uid, nick in g.members.items():
+                is_self = (uid == self.client.user_id)
+                contact = self.client.contacts.get(uid)
+                status = 0 if is_self else (contact.status if contact else 3)
+                ip = self.client.local_ip if is_self else (contact.ip if contact else "")
+                members_detail.append({
+                    "user_id": uid,
+                    "nickname": nick,
+                    "status": status,
+                    "is_self": is_self,
+                    "is_master": (uid == g.master_id),
+                    "ip": ip,
+                })
+            members_detail.sort(key=lambda m: (0 if m["status"] == 0 else 1, m["nickname"].lower()))
+
             groups_list.append({
                 "qgroup_id": g.qgroup_id,
                 "name": g.name,
@@ -304,6 +320,7 @@ class WebGateway:
                 "announcement": g.announcement,
                 "intro": g.intro,
                 "members": g.members,
+                "members_detail": members_detail,
                 "version": g.version,
             })
         return web.json_response({"ok": True, "groups": groups_list})

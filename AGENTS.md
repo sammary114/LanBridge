@@ -276,7 +276,7 @@ ip.addr == 47.57.13.180 && tcp.port == 80
 - **M7 宿主机原生数据无缝适配（Native Nwt Storage Integration）全面交付**：
   * **只读安全隔离架构**：实现 `NativeNwtAdapter`（`lanbridge.adapter.NativeNwtAdapter`），对 `C:\Users\Public\Nwt` 实施严格非侵入只读访问（只读 SQLite URI），不破坏原生客户端运行；
   * **配置与跨网段目标继承**：自动提取 `data/acc`（原生 UID）、`cache/cfg/Option.xml`（`CorpId`、用户名、个性签名）与 `cache/cfg/Network.xml`（`OtherSubnetIp` 自动升规为标准 `/24` 并入开机主动探测池）；
-  * **讨论组与共享空间无感导入**：只读提取 `data/qrp`（SQLite `QGroupInfo_*` 与 `QGroupUser_*`，原生支持真实 Emoji 与 18+ 名成员映射）及 `cache/db/sd`（`ShareData_*` 共享元数据）；
+  * **讨论组与共享空间无感导入**：只读提取 `data/qrp`（SQLite `QGroupInfo_*` 与 `QGroupUser_*`，原生支持真实 Emoji 与 18+ 名成员映射）及 `cache/db/sd`（`ShareData_*` 共享元数据）；并在 Web UI 群聊中提供**群成员侧边面板**，实时呈现群成员在线/离线徽标、群主/自身标识与在线统计，支持点击成员一键发起 1 对 1 私聊；
   * **媒体缓存秒级命中与直接伺服**：复用 `cache/pic/`（356+ 张历史图片）与 `cache/recv/`，实现 Web UI 与 TCP `CFolderTranEngine` 图片秒开秒传（零网络开销）；
   * **全场景一键同步**：Web 端顶栏增加“同步原生内网通”与 `GET /api/native/status`、`POST /api/native/import`、`GET /api/images/{md5}`；CLI 增加 `--web-port`、`--web-only`（脱离底层端口冲突）、`--import-native`、`--native-dir` 与 `--adopt-identity` 启动选项。
 
