@@ -238,6 +238,58 @@ class TestDeviceIdentityAndGrouping(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(extract_msg_id('<invalid>xml</invalid>'), 1)
 
 
+    def test_linux_android_interface_discovery_ip_output(self):
+        """Verify _discover_linux_android_interfaces parses Linux/Android ip command output."""
+        from lanbridge.discovery.network import _discover_linux_android_interfaces
+        mock_output = (
+            "1: lo    inet 127.0.0.1/8 scope host lo\\       valid_lft forever preferred_lft forever\n"
+            "2: wlan0    inet 192.168.31.150/24 brd 192.168.31.255 scope global wlan0\\       valid_lft forever preferred_lft forever\n"
+        )
+        with patch("shutil.which", return_value="/system/bin/ip"), \
+             patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout=mock_output)
+            ifaces = _discover_linux_android_interfaces()
+            self.assertEqual(len(ifaces), 1)
+            self.assertEqual(ifaces[0].name, "wlan0")
+            self.assertEqual(ifaces[0].ip, "192.168.31.150")
+            self.assertEqual(ifaces[0].netmask, "255.255.255.0")
+            self.assertEqual(ifaces[0].broadcast, "192.168.31.255")
+            self.assertEqual(ifaces[0].network, "192.168.31.0/24")
+
+    def test_build_handshake_reply_dynamic_header_flag(self):
+        """Verify build_handshake_reply dynamically reflects peer_id and session_id from 0x82 packet."""
+        from lanbridge.protocol.handshake import build_handshake_reply
+        pkt_82 = (
+            struct.pack(">HH", 0x8FFF, 0x1000)
+            + b"\x82\xff\x00\x01\x00\x05\x00\x00\x00\x00\x05\x78\x00\x01\x00\x00\x00\x00\x00\x01"
+            + b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x13\x88\x00\x00\x00\x02\x00\x00\x00\x02"
+            + b"\xa9\x05\x45\x2a\x00\x00\x00\x00"
+        )
+        reply = build_handshake_reply(pkt_82)
+        h_val = int.from_bytes(reply[:2], "big")
+        # Should reflect peer_id=5 and session_id=1 -> 0x9005
+        self.assertEqual(h_val, 0x8000 | (1 << 12) | 5)
+
+    def test_cli_parser_scan_targets_and_local_ip(self):
+        """Verify CLI parser handles --target, --scan-target and --local-ip."""
+        parser = build_parser()
+        args = parser.parse_args([
+            "--target", "192.168.31.225",
+            "--local-ip", "192.168.31.150",
+        ])
+        self.assertEqual(args.target, "192.168.31.225")
+        self.assertEqual(args.local_ip, "192.168.31.150")
+
+        # Verify client initialization accepts scan_targets
+        client = LanBridgeClient(
+            local_ip=args.local_ip,
+            scan_targets=[args.target],
+            auto_scan_on_start=False,
+        )
+        self.assertIn("192.168.31.225", client.scan_targets)
+        self.assertIn("192.168.31.225", client.broadcast_ips)
+
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -16,14 +16,29 @@ import struct
 from typing import List, Optional
 
 
-def build_handshake_reply(req_packet: bytes, my_seq: int = 0xf7c6) -> bytes:
+def build_handshake_reply(
+    req_packet: bytes,
+    my_seq: int = 0xf7c6,
+    header_flag: Optional[int] = None,
+) -> bytes:
     """Build 48-byte Opcode 0x83 HandshakeReply responding to Opcode 0x82."""
     if len(req_packet) >= 48:
         payload_echo = req_packet[14:48]
     else:
         payload_echo = b"\x00" * 34
+
+    if header_flag is None:
+        req_h_val = int.from_bytes(req_packet[:2], "big")
+        cmd_offset = 4 if (req_h_val & 0x8000) else 2
+        if len(req_packet) >= cmd_offset + 8:
+            out_peer, in_sess, out_sess = struct.unpack(">HBB", req_packet[cmd_offset + 4 : cmd_offset + 8])
+            sess = out_sess if out_sess > 0 else (in_sess if in_sess > 0 else 1)
+            header_flag = 0x8000 | ((sess & 3) << 12) | (out_peer & 0x0FFF)
+        else:
+            header_flag = 0x9000
+
     return (
-        b"\x90\x00"
+        header_flag.to_bytes(2, "big")
         + my_seq.to_bytes(2, "big")
         + b"\x83\xff\x00\x01\x00\x00\x01\x01\x00\x00"
         + payload_echo

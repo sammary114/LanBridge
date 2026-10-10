@@ -37,6 +37,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--corp-id", default=None, help="Organization / Corporation ID (hex MD5)")
     parser.add_argument("--signature", default="LanBridge Native Online", help="Personal status signature")
     parser.add_argument("--broadcast", default=None, help="Subnet broadcast IP (e.g. 192.168.1.255)")
+    parser.add_argument("--target", "--scan-target", default=None, dest="target", help="Specific peer IP or CIDR to connect/scan directly (e.g. 192.168.31.225)")
+    parser.add_argument("--local-ip", "--ip", default=None, dest="local_ip", help="Explicit local IPv4 address to bind/advertise")
     parser.add_argument("--import-native", action="store_true", help="Auto import config, groups, and shares from native Nwt installation")
     parser.add_argument("--native-dir", default=None, help="Path to native Nwt directory (default: C:\\Users\\Public\\Nwt)")
     parser.add_argument("--adopt-identity", action="store_true", help="Adopt native account UID, nickname, and signature")
@@ -63,6 +65,10 @@ async def main_async() -> None:
         client_kwargs["corp_id"] = args.corp_id
     if args.broadcast:
         client_kwargs["broadcast_ip"] = args.broadcast
+    if args.local_ip:
+        client_kwargs["local_ip"] = args.local_ip
+    if args.target:
+        client_kwargs["scan_targets"] = [args.target]
 
     client = LanBridgeClient(**client_kwargs)
 

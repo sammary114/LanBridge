@@ -161,7 +161,10 @@ class LanBridgeClient:
         tiered_ttl_enabled: bool = True,
         shadow_max_filesize: int = 100 * 1024 * 1024,
         auto_scan_on_start: bool = True,
+        scan_targets: Optional[List[str]] = None,
     ) -> None:
+        self.scan_targets = list(scan_targets) if scan_targets else []
+
         if not local_ip or local_ip == "0.0.0.0":
             primary_ip = get_primary_local_ip()
             self.local_ip = primary_ip if primary_ip else "0.0.0.0"
@@ -172,12 +175,21 @@ class LanBridgeClient:
 
         if broadcast_ip is None:
             self.broadcast_ips = get_default_broadcast_addresses()
+            for t in self.scan_targets:
+                if "/" not in t and t not in self.broadcast_ips:
+                    self.broadcast_ips.append(t)
             self.broadcast_ip = self.broadcast_ips[0] if self.broadcast_ips else "255.255.255.255"
         elif isinstance(broadcast_ip, list):
-            self.broadcast_ips = broadcast_ip
+            self.broadcast_ips = list(broadcast_ip)
+            for t in self.scan_targets:
+                if "/" not in t and t not in self.broadcast_ips:
+                    self.broadcast_ips.append(t)
             self.broadcast_ip = broadcast_ip[0] if broadcast_ip else "255.255.255.255"
         else:
             self.broadcast_ips = [broadcast_ip]
+            for t in self.scan_targets:
+                if "/" not in t and t not in self.broadcast_ips:
+                    self.broadcast_ips.append(t)
             self.broadcast_ip = broadcast_ip
 
         self.auto_scan_on_start = auto_scan_on_start
@@ -471,7 +483,7 @@ class LanBridgeClient:
                 session.peer_id = out_peer
                 session.session_id = out_sess if out_sess > 0 else (in_sess if in_sess > 0 else 1)
                 session.connected = True
-            reply_83 = build_handshake_reply(data)
+            reply_83 = build_handshake_reply(data, header_flag=session.get_header_flag())
             replies.append(reply_83)
             return replies
 
@@ -691,7 +703,8 @@ class LanBridgeClient:
         # Opcode 1000 (0x03E8): X_HANDSHARK
         elif opcode == 0x03E8 or "<X_HANDSHARK" in xml_str:
             ready_env = build_x_ready_envelope(self.user_id)
-            replies.extend(build_opcode_88_fragments(ready_env, header_flag=header_flag))
+            ready_pkt = session.build_reliable(channel=0, payload=ready_env)
+            replies.append(ready_pkt)
 
             # Send our profile back if needed so peer has our contact record
             profile_env = build_native_profile(
@@ -703,7 +716,7 @@ class LanBridgeClient:
                 group=self.group,
                 tcp_file_port=self.tcp_file_port,
             )
-            replies.extend(build_opcode_88_fragments(profile_env, header_flag=header_flag))
+            replies.extend(session.build_fragments(channel=0, payload=profile_env))
 
             # Parse sender's nickname and mark online
             import xml.etree.ElementTree as ET
@@ -1741,11 +1754,15 @@ class LanBridgeClient:
         """Actively scan local/cross subnets to discover online peers and update contacts directory."""
         if targets is None:
             targets = []
+            if self.scan_targets:
+                targets.extend(self.scan_targets)
             interfaces = get_active_network_interfaces()
             for iface in interfaces:
                 try:
                     net24 = ipaddress.ip_network(f"{iface.ip}/24", strict=False)
-                    targets.append(str(net24))
+                    net_str = str(net24)
+                    if net_str not in targets:
+                        targets.append(net_str)
                 except Exception as e:
                     logger.debug("Failed computing /24 for interface %s: %s", iface.name, e)
 
@@ -1799,6 +1816,10 @@ class LanBridgeClient:
         """Asynchronously scan local subnets on startup to discover Nwt instances."""
         try:
             await asyncio.sleep(0.1)
+            # Instantly initiate connection to specific IP targets if provided
+            for t in self.scan_targets:
+                if "/" not in t:
+                    asyncio.create_task(self._proactive_connect(t))
             await self.broadcast_presence()
             await self.scan_subnets()
         except asyncio.CancelledError:
